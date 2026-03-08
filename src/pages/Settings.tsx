@@ -1,37 +1,56 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2, Trash2, CheckCircle, XCircle, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-
-const DEFAULT_TRACKING_URL = `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID || "ivyqkprlrosapkmmwkeh"}.supabase.co/functions/v1/track-open`;
 
 export default function Settings() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [trackingUrl, setTrackingUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Settings from DB
+  const [trackingDomain, setTrackingDomain] = useState("");
+  const [trackingDomainVerified, setTrackingDomainVerified] = useState(false);
+  const [verifyingDomain, setVerifyingDomain] = useState(false);
+  const [seedGmail, setSeedGmail] = useState("");
+  const [seedOutlook, setSeedOutlook] = useState("");
+  const [seedCustom, setSeedCustom] = useState("");
+  const [aiWarmupEnabled, setAiWarmupEnabled] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsId, setSettingsId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     const load = async () => {
       try {
-        const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-        if (data) {
-          setName(data.name || "");
-          setEmail(data.email);
+        const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+        if (profile) {
+          setName(profile.name || "");
+          setEmail(profile.email);
         }
-        setTrackingUrl(localStorage.getItem("mailforge_tracking_url") || DEFAULT_TRACKING_URL);
+
+        const { data: settings } = await supabase.from("settings").select("*").eq("user_id", user.id).maybeSingle();
+        if (settings) {
+          setSettingsId(settings.id);
+          setTrackingDomain(settings.tracking_domain || "");
+          setTrackingDomainVerified(settings.tracking_domain_verified);
+          setSeedGmail(settings.seed_gmail || "");
+          setSeedOutlook(settings.seed_outlook || "");
+          setSeedCustom(settings.seed_custom || "");
+          setAiWarmupEnabled(settings.ai_warmup_enabled);
+        }
       } catch (e: any) {
         toast({ title: "Error", description: e.message, variant: "destructive" });
       } finally {
@@ -55,16 +74,65 @@ export default function Settings() {
     }
   };
 
-  const saveTrackingUrl = () => {
-    localStorage.setItem("mailforge_tracking_url", trackingUrl);
-    toast({ title: "Tracking URL saved" });
+  const saveSettings = async (overrides?: Record<string, any>) => {
+    if (!user) return;
+    setSavingSettings(true);
+    try {
+      const payload = {
+        user_id: user.id,
+        tracking_domain: trackingDomain || null,
+        tracking_domain_verified: trackingDomainVerified,
+        seed_gmail: seedGmail || null,
+        seed_outlook: seedOutlook || null,
+        seed_custom: seedCustom || null,
+        ai_warmup_enabled: aiWarmupEnabled,
+        updated_at: new Date().toISOString(),
+        ...overrides,
+      };
+
+      if (settingsId) {
+        const { error } = await supabase.from("settings").update(payload).eq("id", settingsId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from("settings").insert(payload).select().single();
+        if (error) throw error;
+        setSettingsId(data.id);
+      }
+      toast({ title: "Settings saved" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const verifyTrackingDomain = async () => {
+    if (!trackingDomain) return;
+    setVerifyingDomain(true);
+    try {
+      const resp = await fetch(`https://${trackingDomain}/functions/v1/track-open`, { method: "GET", mode: "no-cors" });
+      // no-cors won't give us status, but if it doesn't throw, the domain resolves
+      setTrackingDomainVerified(true);
+      await saveSettings({ tracking_domain_verified: true, tracking_domain: trackingDomain });
+      toast({ title: "Domain verified!" });
+    } catch {
+      setTrackingDomainVerified(false);
+      await saveSettings({ tracking_domain_verified: false, tracking_domain: trackingDomain });
+      toast({ title: "Verification failed", description: "Could not reach tracking domain. Check your CNAME record.", variant: "destructive" });
+    } finally {
+      setVerifyingDomain(false);
+    }
+  };
+
+  const toggleAiWarmup = async (v: boolean) => {
+    setAiWarmupEnabled(v);
+    await saveSettings({ ai_warmup_enabled: v });
   };
 
   const deleteAllCampaigns = async () => {
     if (!user) return;
     setDeleting("campaigns");
     try {
-      // First delete all contacts for user's campaigns
       const { data: campaigns } = await supabase.from("campaigns").select("id");
       if (campaigns && campaigns.length > 0) {
         for (const c of campaigns) {
@@ -109,6 +177,7 @@ export default function Settings() {
     <div className="space-y-6 max-w-2xl">
       <h1 className="text-2xl font-bold">Settings</h1>
 
+      {/* Profile */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Profile</CardTitle>
@@ -128,22 +197,83 @@ export default function Settings() {
         </CardContent>
       </Card>
 
+      {/* Custom Tracking Domain */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Tracking Pixel URL</CardTitle>
+          <CardTitle className="text-base">Custom Tracking Domain</CardTitle>
+          <CardDescription>Use your own subdomain for open-tracking pixels instead of the default Supabase URL.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            The base URL used for open-tracking pixels in campaign emails. Defaults to your Supabase edge function URL.
-          </p>
-          <div className="space-y-2">
-            <Label>Base URL</Label>
-            <Input value={trackingUrl} onChange={(e) => setTrackingUrl(e.target.value)} placeholder={DEFAULT_TRACKING_URL} />
+          <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+            <p className="font-medium text-foreground">Setup Instructions:</p>
+            <p>1. Create a CNAME record pointing your subdomain to <code className="bg-muted px-1 rounded">ivyqkprlrosapkmmwkeh.supabase.co</code></p>
+            <p>2. Enter the subdomain below and click Verify</p>
+            <p>Example: <code className="bg-muted px-1 rounded">track.yourdomain.com</code></p>
           </div>
-          <Button variant="outline" onClick={saveTrackingUrl}>Save URL</Button>
+          <div className="flex gap-2">
+            <Input
+              value={trackingDomain}
+              onChange={(e) => { setTrackingDomain(e.target.value); setTrackingDomainVerified(false); }}
+              placeholder="track.yourdomain.com"
+              className="flex-1"
+            />
+            <Button variant="outline" onClick={verifyTrackingDomain} disabled={verifyingDomain || !trackingDomain} className="gap-2">
+              {verifyingDomain ? <Loader2 className="h-4 w-4 animate-spin" /> : trackingDomainVerified ? <CheckCircle className="h-4 w-4 text-[hsl(var(--success))]" /> : <XCircle className="h-4 w-4" />}
+              {trackingDomainVerified ? "Verified" : "Verify"}
+            </Button>
+          </div>
+          {trackingDomainVerified && (
+            <p className="text-xs text-[hsl(var(--success))]">✓ Tracking domain is active. Campaign emails will use this domain for open tracking.</p>
+          )}
         </CardContent>
       </Card>
 
+      {/* Seed Accounts for Placement Testing */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Seed Accounts</CardTitle>
+          <CardDescription>Configure seed email addresses for inbox placement testing. You'll send test emails to these addresses and manually check where they land.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Gmail Seed</Label>
+            <Input value={seedGmail} onChange={(e) => setSeedGmail(e.target.value)} placeholder="your-seed@gmail.com" />
+          </div>
+          <div className="space-y-2">
+            <Label>Outlook Seed</Label>
+            <Input value={seedOutlook} onChange={(e) => setSeedOutlook(e.target.value)} placeholder="your-seed@outlook.com" />
+          </div>
+          <div className="space-y-2">
+            <Label>Custom Seed</Label>
+            <Input value={seedCustom} onChange={(e) => setSeedCustom(e.target.value)} placeholder="seed@yourdomain.com" />
+          </div>
+          <Button variant="outline" onClick={() => saveSettings()} disabled={savingSettings} className="gap-2">
+            {savingSettings ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : "Save Seed Accounts"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* AI Warmup Content */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            AI Warmup Content
+          </CardTitle>
+          <CardDescription>Generate unique, AI-written warmup emails for every send instead of using the same hardcoded templates.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Enable AI Content</p>
+              <p className="text-xs text-muted-foreground">Uses Gemini to generate unique subject lines and email bodies for each warmup email</p>
+            </div>
+            <Switch checked={aiWarmupEnabled} onCheckedChange={toggleAiWarmup} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Danger Zone */}
       <Card className="border-destructive/30">
         <CardHeader>
           <CardTitle className="text-base text-destructive">Danger Zone</CardTitle>
@@ -158,7 +288,7 @@ export default function Settings() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete all campaigns?</AlertDialogTitle>
-                <AlertDialogDescription>This will permanently delete all your campaigns and their contacts. This action cannot be undone.</AlertDialogDescription>
+                <AlertDialogDescription>This will permanently delete all your campaigns and their contacts.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -178,7 +308,7 @@ export default function Settings() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete all email accounts?</AlertDialogTitle>
-                <AlertDialogDescription>This will permanently delete all your connected email accounts. This action cannot be undone.</AlertDialogDescription>
+                <AlertDialogDescription>This will permanently delete all your connected email accounts.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>

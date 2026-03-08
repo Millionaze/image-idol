@@ -111,8 +111,31 @@ Deno.serve(async (req) => {
       const recipients = accounts.filter((a: any) => a.id !== sender.id);
       const recipient = recipients[Math.floor(Math.random() * recipients.length)];
 
-      const subject = WARMUP_SUBJECTS[Math.floor(Math.random() * WARMUP_SUBJECTS.length)];
-      const body = pickRandomBody();
+      let subject = WARMUP_SUBJECTS[Math.floor(Math.random() * WARMUP_SUBJECTS.length)];
+      let body = pickRandomBody();
+
+      // Check if AI warmup content is enabled for this user
+      try {
+        const { data: userSettings } = await supabaseAdmin
+          .from("settings")
+          .select("ai_warmup_enabled")
+          .eq("user_id", sender.user_id)
+          .maybeSingle();
+
+        if (userSettings?.ai_warmup_enabled) {
+          const aiResp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/generate-warmup-content`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+          if (aiResp.ok) {
+            const aiContent = await aiResp.json();
+            if (aiContent.subject) subject = aiContent.subject;
+            if (aiContent.body) body = aiContent.body;
+          }
+        }
+      } catch (aiErr) {
+        console.error("AI warmup content fallback to hardcoded:", aiErr);
+      }
 
       // Random jitter 0-45 minutes (in ms) — applied as delay between sends
       const jitter = Math.floor(Math.random() * 45 * 60 * 1000);

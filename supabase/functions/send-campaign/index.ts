@@ -61,7 +61,20 @@ Deno.serve(async (req) => {
 
     await supabaseAdmin.from("campaigns").update({ status: "sending" }).eq("id", campaign_id);
 
-    const trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
+    // Check for custom tracking domain
+    let trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
+    try {
+      const { data: userSettings } = await supabaseAdmin
+        .from("settings")
+        .select("tracking_domain, tracking_domain_verified")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (userSettings?.tracking_domain && userSettings?.tracking_domain_verified) {
+        trackBaseUrl = `https://${userSettings.tracking_domain}/functions/v1/track-open`;
+      }
+    } catch (e) {
+      console.error("Failed to load tracking domain settings:", e);
+    }
 
     const client = new SMTPClient({
       connection: {

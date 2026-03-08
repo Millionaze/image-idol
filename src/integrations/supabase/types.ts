@@ -313,6 +313,76 @@ export type Database = {
           },
         ]
       }
+      placement_results: {
+        Row: {
+          created_at: string
+          id: string
+          provider: string
+          result: string
+          seed_email: string
+          test_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          provider: string
+          result?: string
+          seed_email: string
+          test_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          provider?: string
+          result?: string
+          seed_email?: string
+          test_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "placement_results_test_id_fkey"
+            columns: ["test_id"]
+            isOneToOne: false
+            referencedRelation: "placement_tests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      placement_tests: {
+        Row: {
+          account_id: string
+          body: string
+          created_at: string
+          id: string
+          subject: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          body?: string
+          created_at?: string
+          id?: string
+          subject?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          body?: string
+          created_at?: string
+          id?: string
+          subject?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "placement_tests_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
