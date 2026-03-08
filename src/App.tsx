@@ -13,6 +13,7 @@ import Warmup from "@/pages/Warmup";
 import Accounts from "@/pages/Accounts";
 import Campaigns from "@/pages/Campaigns";
 import InboxPage from "@/pages/Inbox";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -33,6 +34,7 @@ const App = () => (
               <Route path="/accounts" element={<Accounts />} />
               <Route path="/campaigns" element={<Campaigns />} />
               <Route path="/inbox" element={<InboxPage />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

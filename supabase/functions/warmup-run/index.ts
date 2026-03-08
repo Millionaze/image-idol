@@ -27,6 +27,7 @@ const WARMUP_BODIES = [
   "Hope everything is going well! Just dropping a quick note to stay in touch. Talk soon!",
   "Hey, just a friendly check-in. How's the week treating you? Would love to catch up when you get a chance.",
   "Hi! Wanted to reach out and say hello. Let me know if there's anything interesting happening on your side!",
+  "Good to hear from you recently. Just wanted to keep the conversation going. Hope all is well!",
 ];
 
 Deno.serve(async (req) => {
@@ -40,7 +41,7 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Check auth if called from frontend (optional for cron)
+    // Optional auth check for frontend calls (cron calls skip this)
     const authHeader = req.headers.get("Authorization");
     if (authHeader?.startsWith("Bearer ")) {
       const supabaseUser = createClient(
@@ -48,14 +49,12 @@ Deno.serve(async (req) => {
         Deno.env.get("SUPABASE_ANON_KEY")!,
         { global: { headers: { Authorization: authHeader } } }
       );
-      const token = authHeader.replace("Bearer ", "");
-      const { error } = await supabaseUser.auth.getClaims(token);
-      if (error) {
+      const { data: { user }, error } = await supabaseUser.auth.getUser();
+      if (error || !user) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
       }
     }
 
-    // Get all accounts with warmup enabled
     const { data: accounts } = await supabaseAdmin
       .from("email_accounts")
       .select("*")
@@ -117,6 +116,11 @@ Deno.serve(async (req) => {
         });
 
         totalSent++;
+
+        // 2 second delay between sends
+        if (i < accounts.length - 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
       } catch (e: any) {
         console.error(`Warmup send failed from ${sender.email}:`, e.message);
         await supabaseAdmin.from("warmup_logs").insert({

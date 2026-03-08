@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ReputationBar } from "@/components/ReputationBar";
-import { Plus, Trash2, TestTube, Mail } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Plus, Trash2, TestTube, Mail, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number; smtp_secure: boolean }> = {
@@ -30,11 +31,20 @@ export default function Accounts() {
   const [open, setOpen] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [smtpError, setSmtpError] = useState<string | null>(null);
 
   const load = async () => {
     if (!user) return;
-    const { data } = await supabase.from("email_accounts").select("*").order("created_at");
-    setAccounts(data || []);
+    try {
+      const { data, error } = await supabase.from("email_accounts").select("*").order("created_at");
+      if (error) throw error;
+      setAccounts(data || []);
+    } catch (e: any) {
+      toast({ title: "Error loading accounts", description: e.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, [user]);
@@ -44,53 +54,73 @@ export default function Accounts() {
     setForm((f) => ({ ...f, ...p }));
   };
 
-  const testConnection = async () => {
+  const saveAccount = async () => {
+    if (!user) return;
+    setSmtpError(null);
+
+    // Step 1: Test SMTP connection first
     setTesting(true);
     try {
       const { data, error } = await supabase.functions.invoke("smtp-test", {
         body: { smtp_host: form.smtp_host, smtp_port: form.smtp_port, smtp_secure: form.smtp_secure, username: form.username, password: form.password },
       });
       if (error) throw error;
-      if (data?.success) {
-        toast({ title: "Connection successful", description: "SMTP credentials are valid" });
-      } else {
-        toast({ title: "Connection failed", description: data?.error || "Could not connect", variant: "destructive" });
+      if (!data?.success) {
+        setSmtpError(data?.error || "SMTP connection failed. Check your credentials.");
+        setTesting(false);
+        return;
       }
     } catch (e: any) {
-      toast({ title: "Test failed", description: e.message, variant: "destructive" });
-    } finally {
+      setSmtpError(e.message || "Could not test SMTP connection");
       setTesting(false);
+      return;
     }
-  };
+    setTesting(false);
 
-  const saveAccount = async () => {
-    if (!user) return;
+    // Step 2: Save account
     setSaving(true);
-    const { error } = await supabase.from("email_accounts").insert({
-      user_id: user.id,
-      ...form,
-    });
-    setSaving(false);
-    if (error) {
-      toast({ title: "Save failed", description: error.message, variant: "destructive" });
-    } else {
+    try {
+      const { error } = await supabase.from("email_accounts").insert({
+        user_id: user.id,
+        ...form,
+      });
+      if (error) throw error;
       toast({ title: "Account added" });
       setForm(emptyForm);
       setOpen(false);
       load();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
   };
 
   const deleteAccount = async (id: string) => {
-    await supabase.from("email_accounts").delete().eq("id", id);
-    load();
+    try {
+      await supabase.from("email_accounts").delete().eq("id", id);
+      load();
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-40" />)}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Email Accounts</h1>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSmtpError(null); }}>
           <DialogTrigger asChild>
             <Button className="gap-2"><Plus className="h-4 w-4" />Add Account</Button>
           </DialogTrigger>
@@ -148,14 +178,22 @@ export default function Accounts() {
                 <Switch checked={form.smtp_secure} onCheckedChange={(v) => setForm((f) => ({ ...f, smtp_secure: v }))} />
                 <Label>Use TLS/SSL</Label>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={testConnection} disabled={testing} className="gap-2">
-                  <TestTube className="h-4 w-4" />{testing ? "Testing..." : "Test Connection"}
-                </Button>
-                <Button onClick={saveAccount} disabled={saving} className="flex-1">
-                  {saving ? "Saving..." : "Save Account"}
-                </Button>
-              </div>
+
+              {smtpError && (
+                <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">
+                  {smtpError}
+                </div>
+              )}
+
+              <Button onClick={saveAccount} disabled={testing || saving} className="w-full gap-2">
+                {testing ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" />Testing connection...</>
+                ) : saving ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" />Saving...</>
+                ) : (
+                  "Connect Account"
+                )}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -165,7 +203,8 @@ export default function Accounts() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Mail className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">No email accounts yet. Add one to get started.</p>
+            <p className="font-medium text-lg mb-1">No accounts connected yet</p>
+            <p className="text-muted-foreground text-sm">Add your first email account to get started</p>
           </CardContent>
         </Card>
       ) : (

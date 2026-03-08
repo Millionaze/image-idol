@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,8 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Send, Megaphone } from "lucide-react";
+import { Plus, Send, Megaphone, Eye, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Campaigns() {
@@ -24,15 +26,23 @@ export default function Campaigns() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [form, setForm] = useState({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "" });
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
     if (!user) return;
-    const [cRes, aRes] = await Promise.all([
-      supabase.from("campaigns").select("*").order("created_at", { ascending: false }),
-      supabase.from("email_accounts").select("id, name, email"),
-    ]);
-    setCampaigns(cRes.data || []);
-    setAccounts(aRes.data || []);
+    try {
+      const [cRes, aRes] = await Promise.all([
+        supabase.from("campaigns").select("*").order("created_at", { ascending: false }),
+        supabase.from("email_accounts").select("id, name, email"),
+      ]);
+      setCampaigns(cRes.data || []);
+      setAccounts(aRes.data || []);
+    } catch (e: any) {
+      toast({ title: "Error loading campaigns", description: e.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, [user]);
@@ -40,46 +50,51 @@ export default function Campaigns() {
   const createCampaign = async () => {
     if (!user) return;
     setSaving(true);
-    const { data: campaign, error } = await supabase.from("campaigns").insert({
-      user_id: user.id,
-      account_id: form.account_id,
-      name: form.name,
-      subject: form.subject,
-      body: form.body,
-      daily_limit: form.daily_limit,
-    }).select().single();
+    try {
+      const { data: campaign, error } = await supabase.from("campaigns").insert({
+        user_id: user.id,
+        account_id: form.account_id,
+        name: form.name,
+        subject: form.subject,
+        body: form.body,
+        daily_limit: form.daily_limit,
+      }).select().single();
 
-    if (error || !campaign) {
-      toast({ title: "Error", description: error?.message || "Failed to create", variant: "destructive" });
+      if (error || !campaign) throw error || new Error("Failed to create");
+
+      const lines = form.contactsRaw.split("\n").filter((l) => l.trim());
+      const contactRows = lines.map((line) => {
+        const [email, ...nameParts] = line.split(",").map((s) => s.trim());
+        return { campaign_id: campaign.id, email, name: nameParts.join(" ") || null };
+      });
+
+      if (contactRows.length > 0) {
+        await supabase.from("contacts").insert(contactRows);
+      }
+
+      toast({ title: "Campaign created", description: `${contactRows.length} contacts added` });
+      setForm({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "" });
+      setOpen(false);
+      load();
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "Failed to create", variant: "destructive" });
+    } finally {
       setSaving(false);
-      return;
     }
-
-    // Parse contacts
-    const lines = form.contactsRaw.split("\n").filter((l) => l.trim());
-    const contactRows = lines.map((line) => {
-      const [email, ...nameParts] = line.split(",").map((s) => s.trim());
-      return { campaign_id: campaign.id, email, name: nameParts.join(" ") || null };
-    });
-
-    if (contactRows.length > 0) {
-      await supabase.from("contacts").insert(contactRows);
-    }
-
-    toast({ title: "Campaign created", description: `${contactRows.length} contacts added` });
-    setForm({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "" });
-    setOpen(false);
-    setSaving(false);
-    load();
   };
 
   const openContactPanel = async (campaign: any) => {
     setSelectedCampaign(campaign);
-    const { data } = await supabase.from("contacts").select("*").eq("campaign_id", campaign.id).order("email");
-    setContacts(data || []);
+    try {
+      const { data } = await supabase.from("contacts").select("*").eq("campaign_id", campaign.id).order("sent_at", { ascending: false });
+      setContacts(data || []);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
   };
 
   const sendCampaign = async (id: string) => {
+    setSending(id);
     try {
       const { data, error } = await supabase.functions.invoke("send-campaign", { body: { campaign_id: id } });
       if (error) throw error;
@@ -87,13 +102,35 @@ export default function Campaigns() {
       load();
     } catch (e: any) {
       toast({ title: "Send failed", description: e.message, variant: "destructive" });
+    } finally {
+      setSending(null);
     }
   };
 
   const deleteCampaign = async (id: string) => {
-    await supabase.from("campaigns").delete().eq("id", id);
-    load();
+    try {
+      await supabase.from("contacts").delete().eq("campaign_id", id);
+      await supabase.from("campaigns").delete().eq("id", id);
+      load();
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+    }
   };
+
+  // Compute open rate for contact panel
+  const sentContacts = contacts.filter((c) => c.status === "sent" || c.status === "opened");
+  const openedContacts = contacts.filter((c) => c.status === "opened");
+  const openRate = sentContacts.length > 0 ? Math.round((openedContacts.length / sentContacts.length) * 100) : 0;
+  const openRateColor = openRate > 30 ? "bg-success" : openRate >= 10 ? "bg-warning" : "bg-destructive";
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-[300px]" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -132,7 +169,7 @@ export default function Campaigns() {
                 <Textarea
                   value={form.body}
                   onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                  placeholder="Hi {{name}},&#10;&#10;I noticed... Use {{name}} and {{email}} for personalization."
+                  placeholder={"Hi {{name}},\n\nI noticed... Use {{name}} and {{email}} for personalization."}
                   rows={6}
                 />
               </div>
@@ -145,12 +182,12 @@ export default function Campaigns() {
                 <Textarea
                   value={form.contactsRaw}
                   onChange={(e) => setForm((f) => ({ ...f, contactsRaw: e.target.value }))}
-                  placeholder="john@example.com, John&#10;jane@example.com, Jane"
+                  placeholder={"john@example.com, John\njane@example.com, Jane"}
                   rows={5}
                 />
               </div>
-              <Button onClick={createCampaign} disabled={saving} className="w-full">
-                {saving ? "Creating..." : "Create Campaign"}
+              <Button onClick={createCampaign} disabled={saving} className="w-full gap-2">
+                {saving ? <><Loader2 className="h-4 w-4 animate-spin" />Creating...</> : "Create Campaign"}
               </Button>
             </div>
           </DialogContent>
@@ -161,7 +198,8 @@ export default function Campaigns() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Megaphone className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">No campaigns yet. Create one to start reaching out.</p>
+            <p className="font-medium text-lg mb-1">No campaigns yet</p>
+            <p className="text-muted-foreground text-sm">Create your first cold email campaign</p>
           </CardContent>
         </Card>
       ) : (
@@ -180,26 +218,28 @@ export default function Campaigns() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {campaigns.map((c) => (
-                  <TableRow key={c.id} className="cursor-pointer" onClick={() => openContactPanel(c)}>
-                    <TableCell className="font-medium">{c.name}</TableCell>
-                    <TableCell><StatusBadge status={c.status} /></TableCell>
-                    <TableCell className="text-right">{c.sent_count}</TableCell>
-                    <TableCell className="text-right">{c.open_count}</TableCell>
-                    <TableCell className="text-right">
-                      {c.sent_count > 0 ? Math.round((c.open_count / c.sent_count) * 100) : 0}%
-                    </TableCell>
-                    <TableCell className="text-right">{c.bounce_count}</TableCell>
-                    <TableCell>
-                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        <Button size="sm" variant="outline" onClick={() => sendCampaign(c.id)} className="gap-1">
-                          <Send className="h-3 w-3" />Send
-                        </Button>
-                        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => deleteCampaign(c.id)}>×</Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {campaigns.map((c) => {
+                  const rate = c.sent_count > 0 ? Math.round((c.open_count / c.sent_count) * 100) : 0;
+                  return (
+                    <TableRow key={c.id} className="cursor-pointer" onClick={() => openContactPanel(c)}>
+                      <TableCell className="font-medium">{c.name}</TableCell>
+                      <TableCell><StatusBadge status={c.status} /></TableCell>
+                      <TableCell className="text-right">{c.sent_count}</TableCell>
+                      <TableCell className="text-right">{c.open_count}</TableCell>
+                      <TableCell className="text-right">{rate}%</TableCell>
+                      <TableCell className="text-right">{c.bounce_count}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                          <Button size="sm" variant="outline" onClick={() => sendCampaign(c.id)} disabled={sending === c.id} className="gap-1">
+                            {sending === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                            Send
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-destructive" onClick={() => deleteCampaign(c.id)}>×</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </CardContent>
@@ -211,7 +251,21 @@ export default function Campaigns() {
           <SheetHeader>
             <SheetTitle>{selectedCampaign?.name} — Contacts</SheetTitle>
           </SheetHeader>
-          <div className="mt-4 space-y-2">
+          <div className="mt-4 space-y-4">
+            {/* Open rate header */}
+            {sentContacts.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5">
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                    {openRate}% open rate
+                  </span>
+                  <span className="text-muted-foreground">{openedContacts.length}/{sentContacts.length} opened</span>
+                </div>
+                <Progress value={openRate} className={`h-2 [&>div]:${openRateColor}`} />
+              </div>
+            )}
+
             {contacts.map((c) => (
               <div key={c.id} className="flex items-center justify-between rounded-lg bg-secondary p-3 text-sm">
                 <div>
@@ -219,7 +273,10 @@ export default function Campaigns() {
                   {c.name && <p className="text-xs text-muted-foreground">{c.name}</p>}
                 </div>
                 <div className="text-right space-y-1">
-                  <StatusBadge status={c.status} />
+                  <div className="flex items-center gap-1.5 justify-end">
+                    {c.status === "opened" && <Eye className="h-3 w-3 text-success" />}
+                    <StatusBadge status={c.status} />
+                  </div>
                   {c.sent_at && <p className="text-xs text-muted-foreground">Sent: {new Date(c.sent_at).toLocaleString()}</p>}
                   {c.opened_at && <p className="text-xs text-success">Opened: {new Date(c.opened_at).toLocaleString()}</p>}
                 </div>
