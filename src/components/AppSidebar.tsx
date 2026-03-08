@@ -27,6 +27,7 @@ const mainItems = [
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Unibox", url: "/unibox", icon: Inbox },
   { title: "Inbox", url: "/inbox", icon: MailIcon },
+  { title: "Contacts", url: "/contacts", icon: Users },
 ];
 
 const toolItems = [

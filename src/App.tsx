@@ -45,6 +45,7 @@ const App = () => (
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/unibox" element={<Unibox />} />
               <Route path="/inbox" element={<InboxPage />} />
+              <Route path="/contacts" element={<Contacts />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/tools/list-cleaner" element={<ListCleaner />} />
               <Route path="/tools/copy-writer" element={<CopyWriter />} />
