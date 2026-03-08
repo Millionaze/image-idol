@@ -60,6 +60,20 @@ export default function Campaigns() {
 
   useEffect(() => { load(); }, [user]);
 
+  // Auto-open dialog with imported contacts from Contacts page
+  useEffect(() => {
+    const state = location.state as { importedContacts?: Array<{ email: string; name?: string | null }> } | null;
+    if (state?.importedContacts && state.importedContacts.length > 0) {
+      const contactsRaw = state.importedContacts
+        .map((c) => `${c.email}${c.name ? `, ${c.name}` : ""}`)
+        .join("\n");
+      setForm((f) => ({ ...f, contactsRaw }));
+      setOpen(true);
+      // Clear location state to prevent re-triggering
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
   const addStep = () => {
     if (steps.length >= 5) return;
     setSteps([...steps, { subject: "", body: "", delay_days: 1, delay_hours: 0 }]);
