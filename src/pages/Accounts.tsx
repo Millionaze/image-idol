@@ -10,8 +10,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ReputationBar } from "@/components/ReputationBar";
 import { DeliverabilityRing } from "@/components/DeliverabilityRing";
 import { DnsHealthPanel } from "@/components/DnsHealthPanel";
+import { BlacklistStatus } from "@/components/BlacklistStatus";
+import { PlacementTestModal } from "@/components/PlacementTestModal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, Loader2, Mail } from "lucide-react";
+import { Plus, Trash2, Loader2, Mail, TestTube, ShieldAlert } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number; smtp_secure: boolean }> = {
@@ -37,6 +39,8 @@ export default function Accounts() {
   const [smtpError, setSmtpError] = useState<string | null>(null);
   const [dnsResults, setDnsResults] = useState<Record<string, any>>({});
   const [expandedDns, setExpandedDns] = useState<string | null>(null);
+  const [placementOpen, setPlacementOpen] = useState(false);
+  const [blacklistResults, setBlacklistResults] = useState<Record<string, { is_clean: boolean; listed_on: string[] }>>({});
 
   const load = async () => {
     if (!user) return;
@@ -44,6 +48,22 @@ export default function Accounts() {
       const { data, error } = await supabase.from("email_accounts").select("*").order("created_at");
       if (error) throw error;
       setAccounts(data || []);
+
+      // Load latest blacklist checks
+      if (data && data.length > 0) {
+        const { data: checks } = await supabase
+          .from("blacklist_checks")
+          .select("*")
+          .in("account_id", data.map((a: any) => a.id))
+          .order("checked_at", { ascending: false });
+        if (checks) {
+          const latest: Record<string, any> = {};
+          for (const c of checks) {
+            if (!latest[c.account_id]) latest[c.account_id] = c;
+          }
+          setBlacklistResults(latest);
+        }
+      }
     } catch (e: any) {
       toast({ title: "Error loading accounts", description: e.message, variant: "destructive" });
     } finally {
@@ -107,13 +127,18 @@ export default function Accounts() {
 
   const computeDeliverabilityScore = useCallback((account: any) => {
     const dns = dnsResults[getDomain(account.email)];
+    const bl = blacklistResults[account.id];
     let score = 0;
     if (dns?.spf) score += 25;
     if (dns?.dkim) score += 25;
     if (dns?.dmarc) score += 25;
-    if (account.reputation_score > 70) score += 25;
+    if (account.reputation_score > 70) score += 10;
+    if (!bl || bl.is_clean) score += 15;
     return score;
-  }, [dnsResults]);
+  }, [dnsResults, blacklistResults]);
+
+  // Check if any account is blacklisted
+  const hasBlacklistedAccount = Object.values(blacklistResults).some((r: any) => !r.is_clean);
 
   if (loading) {
     return (
@@ -128,57 +153,69 @@ export default function Accounts() {
 
   return (
     <div className="space-y-6">
+      {hasBlacklistedAccount && (
+        <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 flex items-center gap-2 text-sm text-destructive">
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          <span className="font-medium">Warning:</span> One or more accounts are listed on email blacklists. This may affect deliverability.
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Email Accounts</h1>
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSmtpError(null); }}>
-          <DialogTrigger asChild>
-            <Button className="gap-2"><Plus className="h-4 w-4" />Add Account</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-auto">
-            <DialogHeader>
-              <DialogTitle>Add Email Account</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="flex gap-2">
-                {Object.keys(presets).map((p) => (
-                  <Button key={p} variant="outline" size="sm" onClick={() => applyPreset(p)}>{p}</Button>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Display Name</Label>
-                  <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="My Gmail" />
+        <div className="flex gap-2">
+          <Button variant="outline" className="gap-2" onClick={() => setPlacementOpen(true)}>
+            <TestTube className="h-4 w-4" />Placement Test
+          </Button>
+          <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSmtpError(null); }}>
+            <DialogTrigger asChild>
+              <Button className="gap-2"><Plus className="h-4 w-4" />Add Account</Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-auto">
+              <DialogHeader>
+                <DialogTitle>Add Email Account</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  {Object.keys(presets).map((p) => (
+                    <Button key={p} variant="outline" size="sm" onClick={() => applyPreset(p)}>{p}</Button>
+                  ))}
                 </div>
-                <div className="space-y-2">
-                  <Label>Email Address</Label>
-                  <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="you@gmail.com" />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Display Name</Label>
+                    <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="My Gmail" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Email Address</Label>
+                    <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="you@gmail.com" />
+                  </div>
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2"><Label>SMTP Host</Label><Input value={form.smtp_host} onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))} /></div>
+                  <div className="space-y-2"><Label>SMTP Port</Label><Input type="number" value={form.smtp_port} onChange={(e) => setForm((f) => ({ ...f, smtp_port: parseInt(e.target.value) }))} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2"><Label>IMAP Host</Label><Input value={form.imap_host} onChange={(e) => setForm((f) => ({ ...f, imap_host: e.target.value }))} /></div>
+                  <div className="space-y-2"><Label>IMAP Port</Label><Input type="number" value={form.imap_port} onChange={(e) => setForm((f) => ({ ...f, imap_port: parseInt(e.target.value) }))} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2"><Label>Username</Label><Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} /></div>
+                  <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={form.smtp_secure} onCheckedChange={(v) => setForm((f) => ({ ...f, smtp_secure: v }))} />
+                  <Label>Use TLS/SSL</Label>
+                </div>
+                {smtpError && (
+                  <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">{smtpError}</div>
+                )}
+                <Button onClick={saveAccount} disabled={testing || saving} className="w-full gap-2">
+                  {testing ? <><Loader2 className="h-4 w-4 animate-spin" />Testing connection...</> : saving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : "Connect Account"}
+                </Button>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>SMTP Host</Label><Input value={form.smtp_host} onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))} /></div>
-                <div className="space-y-2"><Label>SMTP Port</Label><Input type="number" value={form.smtp_port} onChange={(e) => setForm((f) => ({ ...f, smtp_port: parseInt(e.target.value) }))} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>IMAP Host</Label><Input value={form.imap_host} onChange={(e) => setForm((f) => ({ ...f, imap_host: e.target.value }))} /></div>
-                <div className="space-y-2"><Label>IMAP Port</Label><Input type="number" value={form.imap_port} onChange={(e) => setForm((f) => ({ ...f, imap_port: parseInt(e.target.value) }))} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Username</Label><Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} /></div>
-                <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={form.smtp_secure} onCheckedChange={(v) => setForm((f) => ({ ...f, smtp_secure: v }))} />
-                <Label>Use TLS/SSL</Label>
-              </div>
-              {smtpError && (
-                <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">{smtpError}</div>
-              )}
-              <Button onClick={saveAccount} disabled={testing || saving} className="w-full gap-2">
-                {testing ? <><Loader2 className="h-4 w-4 animate-spin" />Testing connection...</> : saving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : "Connect Account"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {accounts.length === 0 ? (
@@ -193,7 +230,6 @@ export default function Accounts() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {accounts.map((a) => {
             const domain = getDomain(a.email);
-            const dns = dnsResults[domain];
             const delivScore = computeDeliverabilityScore(a);
 
             return (
@@ -240,6 +276,9 @@ export default function Accounts() {
                     <span>Status: {a.status}</span>
                   </div>
 
+                  {/* Blacklist Check */}
+                  <BlacklistStatus accountId={a.id} domain={domain} />
+
                   {/* DNS Health Panel toggle */}
                   <Button
                     variant="outline"
@@ -262,6 +301,8 @@ export default function Accounts() {
           })}
         </div>
       )}
+
+      <PlacementTestModal open={placementOpen} onOpenChange={setPlacementOpen} />
     </div>
   );
 }
