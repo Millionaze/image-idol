@@ -14,7 +14,6 @@ Deno.serve(async (req) => {
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
       );
 
-      // Check if contact exists and hasn't been opened yet
       const { data: contact } = await supabase
         .from("contacts")
         .select("id, campaign_id, opened_at")
@@ -22,13 +21,11 @@ Deno.serve(async (req) => {
         .single();
 
       if (contact && !contact.opened_at) {
-        // Update contact
         await supabase.from("contacts").update({
           status: "opened",
           opened_at: new Date().toISOString(),
         }).eq("id", contactId);
 
-        // Increment campaign open count
         const { data: campaign } = await supabase
           .from("campaigns")
           .select("open_count")
@@ -46,7 +43,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Always return the pixel
   return new Response(TRACKING_PIXEL, {
     headers: {
       "Content-Type": "image/gif",
