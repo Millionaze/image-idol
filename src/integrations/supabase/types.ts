@@ -105,6 +105,30 @@ export type Database = {
           },
         ]
       }
+      contact_lists: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       contact_sequence_state: {
         Row: {
           campaign_id: string
@@ -309,6 +333,44 @@ export type Database = {
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      list_contacts: {
+        Row: {
+          company: string | null
+          created_at: string
+          email: string
+          id: string
+          list_id: string
+          name: string | null
+          tags: string[]
+        }
+        Insert: {
+          company?: string | null
+          created_at?: string
+          email: string
+          id?: string
+          list_id: string
+          name?: string | null
+          tags?: string[]
+        }
+        Update: {
+          company?: string | null
+          created_at?: string
+          email?: string
+          id?: string
+          list_id?: string
+          name?: string | null
+          tags?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "list_contacts_list_id_fkey"
+            columns: ["list_id"]
+            isOneToOne: false
+            referencedRelation: "contact_lists"
             referencedColumns: ["id"]
           },
         ]
