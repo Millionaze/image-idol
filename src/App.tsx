@@ -13,6 +13,7 @@ import Warmup from "@/pages/Warmup";
 import Accounts from "@/pages/Accounts";
 import Campaigns from "@/pages/Campaigns";
 import InboxPage from "@/pages/Inbox";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
