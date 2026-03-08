@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,8 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ReputationBar } from "@/components/ReputationBar";
+import { DeliverabilityRing } from "@/components/DeliverabilityRing";
+import { DnsHealthPanel } from "@/components/DnsHealthPanel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, TestTube, Mail, Loader2 } from "lucide-react";
+import { Plus, Trash2, Loader2, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number; smtp_secure: boolean }> = {
@@ -33,6 +35,8 @@ export default function Accounts() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [smtpError, setSmtpError] = useState<string | null>(null);
+  const [dnsResults, setDnsResults] = useState<Record<string, any>>({});
+  const [expandedDns, setExpandedDns] = useState<string | null>(null);
 
   const load = async () => {
     if (!user) return;
@@ -57,8 +61,6 @@ export default function Accounts() {
   const saveAccount = async () => {
     if (!user) return;
     setSmtpError(null);
-
-    // Step 1: Test SMTP connection first
     setTesting(true);
     try {
       const { data, error } = await supabase.functions.invoke("smtp-test", {
@@ -66,7 +68,7 @@ export default function Accounts() {
       });
       if (error) throw error;
       if (!data?.success) {
-        setSmtpError(data?.error || "SMTP connection failed. Check your credentials.");
+        setSmtpError(data?.error || "SMTP connection failed.");
         setTesting(false);
         return;
       }
@@ -77,13 +79,9 @@ export default function Accounts() {
     }
     setTesting(false);
 
-    // Step 2: Save account
     setSaving(true);
     try {
-      const { error } = await supabase.from("email_accounts").insert({
-        user_id: user.id,
-        ...form,
-      });
+      const { error } = await supabase.from("email_accounts").insert({ user_id: user.id, ...form });
       if (error) throw error;
       toast({ title: "Account added" });
       setForm(emptyForm);
@@ -104,6 +102,18 @@ export default function Accounts() {
       toast({ title: "Delete failed", description: e.message, variant: "destructive" });
     }
   };
+
+  const getDomain = (email: string) => email.split("@")[1] || "";
+
+  const computeDeliverabilityScore = useCallback((account: any) => {
+    const dns = dnsResults[getDomain(account.email)];
+    let score = 0;
+    if (dns?.spf) score += 25;
+    if (dns?.dkim) score += 25;
+    if (dns?.dmarc) score += 25;
+    if (account.reputation_score > 70) score += 25;
+    return score;
+  }, [dnsResults]);
 
   if (loading) {
     return (
@@ -145,54 +155,26 @@ export default function Accounts() {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>SMTP Host</Label>
-                  <Input value={form.smtp_host} onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))} />
-                </div>
-                <div className="space-y-2">
-                  <Label>SMTP Port</Label>
-                  <Input type="number" value={form.smtp_port} onChange={(e) => setForm((f) => ({ ...f, smtp_port: parseInt(e.target.value) }))} />
-                </div>
+                <div className="space-y-2"><Label>SMTP Host</Label><Input value={form.smtp_host} onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))} /></div>
+                <div className="space-y-2"><Label>SMTP Port</Label><Input type="number" value={form.smtp_port} onChange={(e) => setForm((f) => ({ ...f, smtp_port: parseInt(e.target.value) }))} /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>IMAP Host</Label>
-                  <Input value={form.imap_host} onChange={(e) => setForm((f) => ({ ...f, imap_host: e.target.value }))} />
-                </div>
-                <div className="space-y-2">
-                  <Label>IMAP Port</Label>
-                  <Input type="number" value={form.imap_port} onChange={(e) => setForm((f) => ({ ...f, imap_port: parseInt(e.target.value) }))} />
-                </div>
+                <div className="space-y-2"><Label>IMAP Host</Label><Input value={form.imap_host} onChange={(e) => setForm((f) => ({ ...f, imap_host: e.target.value }))} /></div>
+                <div className="space-y-2"><Label>IMAP Port</Label><Input type="number" value={form.imap_port} onChange={(e) => setForm((f) => ({ ...f, imap_port: parseInt(e.target.value) }))} /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Username</Label>
-                  <Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Password</Label>
-                  <Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} />
-                </div>
+                <div className="space-y-2"><Label>Username</Label><Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} /></div>
+                <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
               </div>
               <div className="flex items-center gap-2">
                 <Switch checked={form.smtp_secure} onCheckedChange={(v) => setForm((f) => ({ ...f, smtp_secure: v }))} />
                 <Label>Use TLS/SSL</Label>
               </div>
-
               {smtpError && (
-                <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">
-                  {smtpError}
-                </div>
+                <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">{smtpError}</div>
               )}
-
               <Button onClick={saveAccount} disabled={testing || saving} className="w-full gap-2">
-                {testing ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" />Testing connection...</>
-                ) : saving ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" />Saving...</>
-                ) : (
-                  "Connect Account"
-                )}
+                {testing ? <><Loader2 className="h-4 w-4 animate-spin" />Testing connection...</> : saving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : "Connect Account"}
               </Button>
             </div>
           </DialogContent>
@@ -208,37 +190,76 @@ export default function Accounts() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {accounts.map((a) => (
-            <Card key={a.id}>
-              <CardContent className="p-5 space-y-3">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="font-semibold">{a.name}</p>
-                    <p className="text-sm text-muted-foreground">{a.email}</p>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {accounts.map((a) => {
+            const domain = getDomain(a.email);
+            const dns = dnsResults[domain];
+            const delivScore = computeDeliverabilityScore(a);
+
+            return (
+              <Card key={a.id}>
+                <CardContent className="p-5 space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className="relative">
+                        <DeliverabilityRing score={delivScore} size={56} />
+                      </div>
+                      <div>
+                        <p className="font-semibold">{a.name}</p>
+                        <p className="text-sm text-muted-foreground">{a.email}</p>
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={() => deleteAccount(a.id)} className="text-muted-foreground hover:text-destructive">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <Button variant="ghost" size="icon" onClick={() => deleteAccount(a.id)} className="text-muted-foreground hover:text-destructive">
-                    <Trash2 className="h-4 w-4" />
+
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Reputation</span>
+                    <ReputationBar score={a.reputation_score} />
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Warmup</span>
+                    <Switch checked={a.warmup_enabled} onCheckedChange={async (v) => {
+                      const update: any = { warmup_enabled: v };
+                      if (v && !a.warmup_start_date) {
+                        update.warmup_start_date = new Date().toISOString();
+                        update.warmup_ramp_day = 1;
+                      }
+                      await supabase.from("email_accounts").update(update).eq("id", a.id);
+                      load();
+                    }} />
+                  </div>
+                  {a.warmup_enabled && (
+                    <div className="text-xs text-muted-foreground">
+                      Day {a.warmup_ramp_day || 1} · {Math.min((a.warmup_ramp_day || 1) * 2, a.warmup_daily_limit)}/day target · Max {a.warmup_daily_limit}/day
+                    </div>
+                  )}
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>SMTP: {a.smtp_host}:{a.smtp_port}</span>
+                    <span>Status: {a.status}</span>
+                  </div>
+
+                  {/* DNS Health Panel toggle */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs"
+                    onClick={() => setExpandedDns(expandedDns === a.id ? null : a.id)}
+                  >
+                    {expandedDns === a.id ? "Hide" : "Show"} Domain Health
                   </Button>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Reputation</span>
-                  <ReputationBar score={a.reputation_score} />
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Warmup</span>
-                  <Switch checked={a.warmup_enabled} onCheckedChange={async (v) => {
-                    await supabase.from("email_accounts").update({ warmup_enabled: v }).eq("id", a.id);
-                    load();
-                  }} />
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>SMTP: {a.smtp_host}:{a.smtp_port}</span>
-                  <span>Status: {a.status}</span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+
+                  {expandedDns === a.id && (
+                    <DnsHealthPanel
+                      domain={domain}
+                      onResult={(result) => setDnsResults((prev) => ({ ...prev, [domain]: result }))}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

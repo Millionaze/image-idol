@@ -14,6 +14,8 @@ import Accounts from "@/pages/Accounts";
 import Campaigns from "@/pages/Campaigns";
 import InboxPage from "@/pages/Inbox";
 import Settings from "@/pages/Settings";
+import Analytics from "@/pages/Analytics";
+import Unibox from "@/pages/Unibox";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -33,6 +35,8 @@ const App = () => (
               <Route path="/warmup" element={<Warmup />} />
               <Route path="/accounts" element={<Accounts />} />
               <Route path="/campaigns" element={<Campaigns />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/unibox" element={<Unibox />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/settings" element={<Settings />} />
             </Route>

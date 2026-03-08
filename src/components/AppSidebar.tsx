@@ -1,7 +1,10 @@
-import { Flame, LayoutDashboard, Zap, Mail, Megaphone, Inbox, LogOut, Settings } from "lucide-react";
+import { Flame, LayoutDashboard, Zap, Mail, Megaphone, Inbox, LogOut, Settings, BarChart3, Mail as MailIcon } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Badge } from "@/components/ui/badge";
 import {
   Sidebar,
   SidebarContent,
@@ -14,13 +17,14 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-const navItems = [
+const mainItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Warmup", url: "/warmup", icon: Zap },
   { title: "Accounts", url: "/accounts", icon: Mail },
   { title: "Campaigns", url: "/campaigns", icon: Megaphone },
-  { title: "Inbox", url: "/inbox", icon: Inbox },
-  { title: "Settings", url: "/settings", icon: Settings },
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Unibox", url: "/unibox", icon: Inbox },
+  { title: "Inbox", url: "/inbox", icon: MailIcon },
 ];
 
 export function AppSidebar() {
@@ -28,6 +32,23 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const { signOut } = useAuth();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    const loadUnread = async () => {
+      try {
+        const { count } = await supabase
+          .from("inbox_messages")
+          .select("*", { count: "exact", head: true })
+          .eq("is_read", false)
+          .eq("is_warmup", false);
+        setUnreadCount(count || 0);
+      } catch { /* silent */ }
+    };
+    loadUnread();
+    const interval = setInterval(loadUnread, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -43,7 +64,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
+              {mainItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink
@@ -53,7 +74,16 @@ export function AppSidebar() {
                       activeClassName="bg-sidebar-accent text-primary font-medium"
                     >
                       <item.icon className="h-4 w-4 shrink-0" />
-                      {!collapsed && <span>{item.title}</span>}
+                      {!collapsed && (
+                        <span className="flex items-center gap-2">
+                          {item.title}
+                          {item.title === "Unibox" && unreadCount > 0 && (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 min-w-[18px] flex items-center justify-center">
+                              {unreadCount}
+                            </Badge>
+                          )}
+                        </span>
+                      )}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -64,6 +94,18 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-2">
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild>
+              <NavLink
+                to="/settings"
+                className="flex items-center gap-3 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors rounded-md px-3 py-2"
+                activeClassName="bg-sidebar-accent text-primary font-medium"
+              >
+                <Settings className="h-4 w-4 shrink-0" />
+                {!collapsed && <span>Settings</span>}
+              </NavLink>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton onClick={signOut} className="flex items-center gap-3 text-sm text-muted-foreground hover:text-foreground cursor-pointer">
               <LogOut className="h-4 w-4 shrink-0" />
