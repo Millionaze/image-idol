@@ -17,6 +17,12 @@ import Settings from "@/pages/Settings";
 import Analytics from "@/pages/Analytics";
 import Unibox from "@/pages/Unibox";
 import NotFound from "@/pages/NotFound";
+import ListCleaner from "@/pages/tools/ListCleaner";
+import CopyWriter from "@/pages/tools/CopyWriter";
+import SubjectTester from "@/pages/tools/SubjectTester";
+import SendPlanner from "@/pages/tools/SendPlanner";
+import AuditReport from "@/pages/tools/AuditReport";
+import Spintax from "@/pages/tools/Spintax";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +45,12 @@ const App = () => (
               <Route path="/unibox" element={<Unibox />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/tools/list-cleaner" element={<ListCleaner />} />
+              <Route path="/tools/copy-writer" element={<CopyWriter />} />
+              <Route path="/tools/subject-tester" element={<SubjectTester />} />
+              <Route path="/tools/send-planner" element={<SendPlanner />} />
+              <Route path="/tools/audit-report" element={<AuditReport />} />
+              <Route path="/tools/spintax" element={<Spintax />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
