@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { LayoutDashboard, Mail, Zap, Megaphone } from "lucide-react";
+import { LayoutDashboard, Mail, Zap, Megaphone, AlertTriangle } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useToast } from "@/hooks/use-toast";
 
@@ -17,13 +17,14 @@ export default function Dashboard() {
   const [warmupLogs, setWarmupLogs] = useState<any[]>([]);
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [weakestAccount, setWeakestAccount] = useState<any>(null);
 
   useEffect(() => {
     if (!user) return;
     const load = async () => {
       try {
         const [accountsRes, campaignsRes, logsRes] = await Promise.all([
-          supabase.from("email_accounts").select("reputation_score, warmup_total_sent"),
+          supabase.from("email_accounts").select("*"),
           supabase.from("campaigns").select("*").order("created_at", { ascending: false }).limit(10),
           supabase.from("warmup_logs").select("*, email_accounts(email)").order("created_at", { ascending: false }).limit(20),
         ]);
@@ -41,7 +42,15 @@ export default function Dashboard() {
         setCampaigns(campaignsRes.data || []);
         setWarmupLogs(logsRes.data || []);
 
-        // Build 7-day chart from real warmup_logs
+        // Find weakest account (lowest reputation)
+        if (accounts.length > 0) {
+          const weakest = accounts.reduce((min, a) => a.reputation_score < min.reputation_score ? a : min, accounts[0]);
+          if (weakest.reputation_score < 60) {
+            setWeakestAccount(weakest);
+          }
+        }
+
+        // Build 7-day chart
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
         sevenDaysAgo.setHours(0, 0, 0, 0);
@@ -106,6 +115,19 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Dashboard</h1>
+
+      {weakestAccount && (
+        <div className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 p-4 text-sm">
+          <AlertTriangle className="h-5 w-5 text-warning shrink-0" />
+          <div>
+            <p className="font-medium text-warning">Weakest account: {weakestAccount.name}</p>
+            <p className="text-muted-foreground">
+              {weakestAccount.email} has a reputation score of {weakestAccount.reputation_score}/100.
+              Consider enabling warmup to improve deliverability.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {statCards.map((s) => (

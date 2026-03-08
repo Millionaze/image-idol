@@ -14,6 +14,38 @@ export type Database = {
   }
   public: {
     Tables: {
+      blacklist_checks: {
+        Row: {
+          account_id: string
+          checked_at: string
+          id: string
+          is_clean: boolean
+          listed_on: string[]
+        }
+        Insert: {
+          account_id: string
+          checked_at?: string
+          id?: string
+          is_clean?: boolean
+          listed_on?: string[]
+        }
+        Update: {
+          account_id?: string
+          checked_at?: string
+          id?: string
+          is_clean?: boolean
+          listed_on?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "blacklist_checks_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           account_id: string
@@ -22,6 +54,7 @@ export type Database = {
           created_at: string
           daily_limit: number
           id: string
+          is_sequence: boolean
           name: string
           open_count: number
           reply_count: number
@@ -37,6 +70,7 @@ export type Database = {
           created_at?: string
           daily_limit?: number
           id?: string
+          is_sequence?: boolean
           name: string
           open_count?: number
           reply_count?: number
@@ -52,6 +86,7 @@ export type Database = {
           created_at?: string
           daily_limit?: number
           id?: string
+          is_sequence?: boolean
           name?: string
           open_count?: number
           reply_count?: number
@@ -66,6 +101,48 @@ export type Database = {
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_sequence_state: {
+        Row: {
+          campaign_id: string
+          contact_id: string
+          current_step: number
+          id: string
+          next_send_at: string | null
+          status: Database["public"]["Enums"]["sequence_state_status"]
+        }
+        Insert: {
+          campaign_id: string
+          contact_id: string
+          current_step?: number
+          id?: string
+          next_send_at?: string | null
+          status?: Database["public"]["Enums"]["sequence_state_status"]
+        }
+        Update: {
+          campaign_id?: string
+          contact_id?: string
+          current_step?: number
+          id?: string
+          next_send_at?: string | null
+          status?: Database["public"]["Enums"]["sequence_state_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_sequence_state_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_sequence_state_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
         ]
@@ -118,20 +195,25 @@ export type Database = {
           id: string
           imap_host: string | null
           imap_port: number | null
+          mark_important_rate: number
           name: string
           password: string
           reputation_score: number
           smtp_host: string
           smtp_port: number
           smtp_secure: boolean
+          spam_rescue_rate: number
           status: string
           user_id: string
           username: string
           warmup_daily_limit: number
           warmup_enabled: boolean
+          warmup_ramp_day: number
           warmup_sent_today: number
+          warmup_start_date: string | null
           warmup_total_received: number
           warmup_total_sent: number
+          warmup_weekdays_only: boolean
         }
         Insert: {
           created_at?: string
@@ -139,20 +221,25 @@ export type Database = {
           id?: string
           imap_host?: string | null
           imap_port?: number | null
+          mark_important_rate?: number
           name: string
           password: string
           reputation_score?: number
           smtp_host: string
           smtp_port?: number
           smtp_secure?: boolean
+          spam_rescue_rate?: number
           status?: string
           user_id: string
           username: string
           warmup_daily_limit?: number
           warmup_enabled?: boolean
+          warmup_ramp_day?: number
           warmup_sent_today?: number
+          warmup_start_date?: string | null
           warmup_total_received?: number
           warmup_total_sent?: number
+          warmup_weekdays_only?: boolean
         }
         Update: {
           created_at?: string
@@ -160,20 +247,25 @@ export type Database = {
           id?: string
           imap_host?: string | null
           imap_port?: number | null
+          mark_important_rate?: number
           name?: string
           password?: string
           reputation_score?: number
           smtp_host?: string
           smtp_port?: number
           smtp_secure?: boolean
+          spam_rescue_rate?: number
           status?: string
           user_id?: string
           username?: string
           warmup_daily_limit?: number
           warmup_enabled?: boolean
+          warmup_ramp_day?: number
           warmup_sent_today?: number
+          warmup_start_date?: string | null
           warmup_total_received?: number
           warmup_total_sent?: number
+          warmup_weekdays_only?: boolean
         }
         Relationships: []
       }
@@ -242,6 +334,83 @@ export type Database = {
         }
         Relationships: []
       }
+      sequence_steps: {
+        Row: {
+          body: string
+          campaign_id: string
+          delay_days: number
+          delay_hours: number
+          id: string
+          step_number: number
+          subject: string
+        }
+        Insert: {
+          body?: string
+          campaign_id: string
+          delay_days?: number
+          delay_hours?: number
+          id?: string
+          step_number?: number
+          subject?: string
+        }
+        Update: {
+          body?: string
+          campaign_id?: string
+          delay_days?: number
+          delay_hours?: number
+          id?: string
+          step_number?: number
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sequence_steps_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      settings: {
+        Row: {
+          ai_warmup_enabled: boolean
+          created_at: string
+          id: string
+          seed_custom: string | null
+          seed_gmail: string | null
+          seed_outlook: string | null
+          tracking_domain: string | null
+          tracking_domain_verified: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_warmup_enabled?: boolean
+          created_at?: string
+          id?: string
+          seed_custom?: string | null
+          seed_gmail?: string | null
+          seed_outlook?: string | null
+          tracking_domain?: string | null
+          tracking_domain_verified?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_warmup_enabled?: boolean
+          created_at?: string
+          id?: string
+          seed_custom?: string | null
+          seed_gmail?: string | null
+          seed_outlook?: string | null
+          tracking_domain?: string | null
+          tracking_domain_verified?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       warmup_logs: {
         Row: {
           account_id: string
@@ -289,8 +458,13 @@ export type Database = {
     }
     Enums: {
       campaign_status: "draft" | "sending" | "active" | "paused"
-      contact_status: "pending" | "sent" | "opened" | "bounced"
-      warmup_log_type: "sent" | "received"
+      contact_status: "pending" | "sent" | "opened" | "bounced" | "replied"
+      sequence_state_status: "active" | "completed" | "paused"
+      warmup_log_type:
+        | "sent"
+        | "received"
+        | "marked_important"
+        | "rescued_from_spam"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -419,8 +593,14 @@ export const Constants = {
   public: {
     Enums: {
       campaign_status: ["draft", "sending", "active", "paused"],
-      contact_status: ["pending", "sent", "opened", "bounced"],
-      warmup_log_type: ["sent", "received"],
+      contact_status: ["pending", "sent", "opened", "bounced", "replied"],
+      sequence_state_status: ["active", "completed", "paused"],
+      warmup_log_type: [
+        "sent",
+        "received",
+        "marked_important",
+        "rescued_from_spam",
+      ],
     },
   },
 } as const
