@@ -284,6 +284,33 @@ export default function Contacts() {
     URL.revokeObjectURL(url);
   }, [filteredContacts]);
 
+  const handleFileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file && (file.type === "text/csv" || file.name.endsWith(".csv"))) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setCsvText(ev.target?.result as string || "");
+      reader.readAsText(file);
+    } else {
+      toast({ title: "Invalid file", description: "Please upload a .csv file", variant: "destructive" });
+    }
+  }, [toast]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setCsvText(ev.target?.result as string || "");
+      reader.readAsText(file);
+    }
+    e.target.value = "";
+  }, []);
+
+  const importToCampaign = useCallback(() => {
+    navigate("/campaigns", { state: { importedContacts: filteredContacts } });
+  }, [navigate, filteredContacts]);
+
   const toggleSelect = (id: string) => {
     setSelectedContacts((prev) => {
       const next = new Set(prev);
