@@ -29,6 +29,7 @@ interface SequenceStep {
 export default function Campaigns() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const location = useLocation();
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
