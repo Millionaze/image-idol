@@ -437,8 +437,29 @@ export default function Contacts() {
                           <p className="text-sm text-muted-foreground">
                             Format: <code className="text-xs bg-muted px-1 py-0.5 rounded">email, name, company, tags (semicolon-separated)</code>
                           </p>
+                          {/* Drag and drop zone */}
+                          <div
+                            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50"}`}
+                            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                            onDragLeave={() => setIsDragging(false)}
+                            onDrop={handleFileDrop}
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            <FileUp className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                            <p className="text-sm font-medium text-foreground">
+                              {isDragging ? "Drop your CSV file here" : "Drag & drop a CSV file or click to browse"}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">or paste CSV data below</p>
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept=".csv"
+                              className="hidden"
+                              onChange={handleFileSelect}
+                            />
+                          </div>
                           <Textarea
-                            rows={10}
+                            rows={8}
                             placeholder={"john@example.com, John Doe, Acme Inc, lead;hot\njane@test.com, Jane Smith, ,"}
                             value={csvText}
                             onChange={(e) => setCsvText(e.target.value)}
