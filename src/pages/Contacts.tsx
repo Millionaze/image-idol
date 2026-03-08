@@ -37,6 +37,9 @@ export default function Contacts() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [showNewListDialog, setShowNewListDialog] = useState(false);
