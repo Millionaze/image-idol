@@ -1,1 +1,16 @@
 project_id = "ivyqkprlrosapkmmwkeh"
+
+[functions.smtp-test]
+verify_jwt = false
+
+[functions.send-campaign]
+verify_jwt = false
+
+[functions.warmup-run]
+verify_jwt = false
+
+[functions.track-open]
+verify_jwt = false
+
+[functions.inbox-sync]
+verify_jwt = false
