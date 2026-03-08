@@ -3,7 +3,7 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const WARMUP_SUBJECTS = [
@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Check auth if called from frontend
+    // Check auth if called from frontend (optional for cron)
     const authHeader = req.headers.get("Authorization");
     if (authHeader?.startsWith("Bearer ")) {
       const supabaseUser = createClient(
@@ -48,7 +48,8 @@ Deno.serve(async (req) => {
         Deno.env.get("SUPABASE_ANON_KEY")!,
         { global: { headers: { Authorization: authHeader } } }
       );
-      const { error } = await supabaseUser.auth.getClaims(authHeader.replace("Bearer ", ""));
+      const token = authHeader.replace("Bearer ", "");
+      const { error } = await supabaseUser.auth.getClaims(token);
       if (error) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
       }
@@ -72,7 +73,6 @@ Deno.serve(async (req) => {
       const sender = accounts[i];
       if (sender.warmup_sent_today >= sender.warmup_daily_limit) continue;
 
-      // Pick a random recipient (not self)
       const recipients = accounts.filter((a) => a.id !== sender.id);
       const recipient = recipients[Math.floor(Math.random() * recipients.length)];
 
@@ -98,19 +98,16 @@ Deno.serve(async (req) => {
 
         await client.close();
 
-        // Update sender stats
         await supabaseAdmin.from("email_accounts").update({
           warmup_sent_today: sender.warmup_sent_today + 1,
           warmup_total_sent: sender.warmup_total_sent + 1,
           reputation_score: Math.min(100, sender.reputation_score + 1),
         }).eq("id", sender.id);
 
-        // Update recipient stats
         await supabaseAdmin.from("email_accounts").update({
           warmup_total_received: recipient.warmup_total_received + 1,
         }).eq("id", recipient.id);
 
-        // Log
         await supabaseAdmin.from("warmup_logs").insert({
           account_id: sender.id,
           type: "sent",
