@@ -16,6 +16,7 @@ import InboxPage from "@/pages/Inbox";
 import Settings from "@/pages/Settings";
 import Analytics from "@/pages/Analytics";
 import Unibox from "@/pages/Unibox";
+import Contacts from "@/pages/Contacts";
 import NotFound from "@/pages/NotFound";
 import ListCleaner from "@/pages/tools/ListCleaner";
 import CopyWriter from "@/pages/tools/CopyWriter";
@@ -44,6 +45,7 @@ const App = () => (
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/unibox" element={<Unibox />} />
               <Route path="/inbox" element={<InboxPage />} />
+              <Route path="/contacts" element={<Contacts />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/tools/list-cleaner" element={<ListCleaner />} />
               <Route path="/tools/copy-writer" element={<CopyWriter />} />
