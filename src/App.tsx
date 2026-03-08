@@ -16,6 +16,7 @@ import InboxPage from "@/pages/Inbox";
 import Settings from "@/pages/Settings";
 import Analytics from "@/pages/Analytics";
 import Unibox from "@/pages/Unibox";
+import Contacts from "@/pages/Contacts";
 import NotFound from "@/pages/NotFound";
 import ListCleaner from "@/pages/tools/ListCleaner";
 import CopyWriter from "@/pages/tools/CopyWriter";
