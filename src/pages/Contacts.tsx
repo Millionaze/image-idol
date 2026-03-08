@@ -493,6 +493,9 @@ export default function Contacts() {
                       <Button variant="outline" size="sm" onClick={exportCsv} disabled={filteredContacts.length === 0}>
                         <Download className="h-4 w-4 mr-1" />Export
                       </Button>
+                      <Button variant="outline" size="sm" onClick={importToCampaign} disabled={filteredContacts.length === 0}>
+                        <Megaphone className="h-4 w-4 mr-1" />Import to Campaign
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
