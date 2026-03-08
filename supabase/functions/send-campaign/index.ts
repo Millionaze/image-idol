@@ -23,9 +23,8 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: authError } = await supabase.auth.getClaims(token);
-    if (authError || !claimsData?.claims) {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
 
@@ -39,19 +38,16 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "campaign_id required" }), { status: 400, headers: corsHeaders });
     }
 
-    // Get campaign (user-scoped)
     const { data: campaign, error: cErr } = await supabase.from("campaigns").select("*").eq("id", campaign_id).single();
     if (cErr || !campaign) {
       return new Response(JSON.stringify({ error: "Campaign not found" }), { status: 404, headers: corsHeaders });
     }
 
-    // Get sending account (user-scoped)
     const { data: account } = await supabase.from("email_accounts").select("*").eq("id", campaign.account_id).single();
     if (!account) {
       return new Response(JSON.stringify({ error: "Sending account not found" }), { status: 404, headers: corsHeaders });
     }
 
-    // Get pending contacts
     const { data: pendingContacts } = await supabase
       .from("contacts")
       .select("*")
@@ -63,10 +59,9 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ message: "No pending contacts to send" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Update campaign status via admin to avoid race conditions
     await supabaseAdmin.from("campaigns").update({ status: "sending" }).eq("id", campaign_id);
 
-    const functionsUrl = `https://ivyqkprlrosapkmmwkeh.supabase.co/functions/v1`;
+    const trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
 
     const client = new SMTPClient({
       connection: {
@@ -78,16 +73,19 @@ Deno.serve(async (req) => {
     });
 
     let sentCount = 0;
+    let bounceCount = 0;
 
     for (const contact of pendingContacts) {
       try {
+        const contactName = contact.name || contact.email.split("@")[0];
+
         const subject = campaign.subject
-          .replace(/\{\{name\}\}/g, contact.name || "")
+          .replace(/\{\{name\}\}/g, contactName)
           .replace(/\{\{email\}\}/g, contact.email);
 
-        const trackingPixel = `<img src="${functionsUrl}/track-open?id=${contact.id}" width="1" height="1" style="display:none" />`;
+        const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
         const body = campaign.body
-          .replace(/\{\{name\}\}/g, contact.name || "")
+          .replace(/\{\{name\}\}/g, contactName)
           .replace(/\{\{email\}\}/g, contact.email) + trackingPixel;
 
         await client.send({
@@ -107,7 +105,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.error(`Failed to send to ${contact.email}:`, e);
         await supabaseAdmin.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
-        await supabaseAdmin.from("campaigns").update({ bounce_count: campaign.bounce_count + 1 }).eq("id", campaign_id);
+        bounceCount++;
       }
     }
 
@@ -115,10 +113,11 @@ Deno.serve(async (req) => {
 
     await supabaseAdmin.from("campaigns").update({
       sent_count: campaign.sent_count + sentCount,
+      bounce_count: campaign.bounce_count + bounceCount,
       status: "active",
     }).eq("id", campaign_id);
 
-    return new Response(JSON.stringify({ message: `Sent ${sentCount} emails` }), {
+    return new Response(JSON.stringify({ message: `Sent ${sentCount} emails, ${bounceCount} bounced` }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: any) {

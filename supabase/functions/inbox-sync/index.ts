@@ -22,9 +22,8 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: authError } = await supabase.auth.getClaims(token);
-    if (authError || !claimsData?.claims) {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
 
@@ -38,15 +37,21 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // Demo mode: insert realistic sample messages
+    // Real IMAP sync requires a self-hosted backend with IMAP library support
+    const now = Date.now();
     const sampleMessages = [
-      { account_id, from_email: "alice@example.com", from_name: "Alice Johnson", subject: "Re: Quick question", body: "Hey! Thanks for reaching out. Yes, I'd be happy to discuss this further. Let me know when you're free for a call.", received_at: new Date().toISOString() },
-      { account_id, from_email: "bob@company.com", from_name: "Bob Smith", subject: "Follow up on proposal", body: "Hi there,\n\nI reviewed the proposal you sent over. I have a few questions about the timeline. Can we schedule a meeting this week?", received_at: new Date(Date.now() - 3600000).toISOString() },
-      { account_id, from_email: "support@service.com", from_name: "Support Team", subject: "Your account has been updated", body: "Your account settings have been successfully updated. If you did not make this change, please contact us immediately.", received_at: new Date(Date.now() - 7200000).toISOString() },
+      { account_id, from_email: "alice@example.com", from_name: "Alice Johnson", subject: "Re: Quick question about your product", body: "Hey! Thanks for reaching out. Yes, I'd be happy to discuss this further. Let me know when you're free for a call this week.", received_at: new Date(now).toISOString() },
+      { account_id, from_email: "bob@company.com", from_name: "Bob Smith", subject: "Follow up on proposal", body: "Hi there,\n\nI reviewed the proposal you sent over. I have a few questions about the timeline and budget. Can we schedule a meeting this week?\n\nBest,\nBob", received_at: new Date(now - 3600000).toISOString() },
+      { account_id, from_email: "sarah@startup.io", from_name: "Sarah Chen", subject: "Partnership opportunity", body: "Hi!\n\nI came across your company and think there might be a great synergy between our products. Would you be open to a quick 15-minute intro call?\n\nCheers,\nSarah", received_at: new Date(now - 7200000).toISOString() },
+      { account_id, from_email: "newsletter@techweekly.com", from_name: "Tech Weekly", subject: "This week in tech: AI breakthroughs", body: "Here's your weekly roundup of the most important tech news...\n\n1. New AI model beats benchmarks\n2. Startup raises $50M Series B\n3. Open source project hits 100k stars", received_at: new Date(now - 14400000).toISOString() },
+      { account_id, from_email: "mike@agency.co", from_name: "Mike Torres", subject: "Campaign results are in!", body: "Great news! Your latest campaign outperformed expectations:\n\n- Open rate: 34%\n- Click rate: 8.2%\n- Reply rate: 2.1%\n\nLet me know if you want to discuss scaling this up.", received_at: new Date(now - 21600000).toISOString() },
+      { account_id, from_email: "support@saasplatform.com", from_name: "SaaS Platform Support", subject: "Your subscription has been renewed", body: "Your monthly subscription has been successfully renewed. Amount: $49/month.\n\nIf you have any questions about your account, feel free to reach out.", received_at: new Date(now - 43200000).toISOString() },
     ];
 
     await supabaseAdmin.from("inbox_messages").insert(sampleMessages);
 
-    return new Response(JSON.stringify({ message: "Synced 3 messages (demo mode — IMAP integration pending)" }), {
+    return new Response(JSON.stringify({ message: "Synced 6 messages (demo mode — real IMAP sync requires a self-hosted backend)" }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: any) {

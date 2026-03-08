@@ -1,4 +1,4 @@
-import { Flame, LayoutDashboard, Zap, Mail, Megaphone, Inbox, LogOut } from "lucide-react";
+import { Flame, LayoutDashboard, Zap, Mail, Megaphone, Inbox, LogOut, Settings } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,6 +20,7 @@ const navItems = [
   { title: "Accounts", url: "/accounts", icon: Mail },
   { title: "Campaigns", url: "/campaigns", icon: Megaphone },
   { title: "Inbox", url: "/inbox", icon: Inbox },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {

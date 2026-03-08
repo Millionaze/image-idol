@@ -4,47 +4,82 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { LayoutDashboard, Mail, Zap, Megaphone } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-// Mock chart data for 7-day activity
-const chartData = Array.from({ length: 7 }, (_, i) => {
-  const d = new Date();
-  d.setDate(d.getDate() - (6 - i));
-  return {
-    day: d.toLocaleDateString("en", { weekday: "short" }),
-    warmup: Math.floor(Math.random() * 20) + 5,
-    sent: Math.floor(Math.random() * 30) + 2,
-  };
-});
+import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [stats, setStats] = useState({ accounts: 0, warmupSent: 0, campaigns: 0, avgReputation: 0 });
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [warmupLogs, setWarmupLogs] = useState<any[]>([]);
+  const [chartData, setChartData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
     const load = async () => {
-      const [accountsRes, campaignsRes, logsRes] = await Promise.all([
-        supabase.from("email_accounts").select("reputation_score, warmup_total_sent"),
-        supabase.from("campaigns").select("*").order("created_at", { ascending: false }).limit(10),
-        supabase.from("warmup_logs").select("*, email_accounts(email)").order("created_at", { ascending: false }).limit(20),
-      ]);
+      try {
+        const [accountsRes, campaignsRes, logsRes] = await Promise.all([
+          supabase.from("email_accounts").select("reputation_score, warmup_total_sent"),
+          supabase.from("campaigns").select("*").order("created_at", { ascending: false }).limit(10),
+          supabase.from("warmup_logs").select("*, email_accounts(email)").order("created_at", { ascending: false }).limit(20),
+        ]);
 
-      const accounts = accountsRes.data || [];
-      const avgRep = accounts.length ? Math.round(accounts.reduce((s, a) => s + a.reputation_score, 0) / accounts.length) : 0;
-      const totalWarmup = accounts.reduce((s, a) => s + a.warmup_total_sent, 0);
+        const accounts = accountsRes.data || [];
+        const avgRep = accounts.length ? Math.round(accounts.reduce((s, a) => s + a.reputation_score, 0) / accounts.length) : 0;
+        const totalWarmup = accounts.reduce((s, a) => s + a.warmup_total_sent, 0);
 
-      setStats({
-        accounts: accounts.length,
-        warmupSent: totalWarmup,
-        campaigns: (campaignsRes.data || []).length,
-        avgReputation: avgRep,
-      });
-      setCampaigns(campaignsRes.data || []);
-      setWarmupLogs(logsRes.data || []);
+        setStats({
+          accounts: accounts.length,
+          warmupSent: totalWarmup,
+          campaigns: (campaignsRes.data || []).length,
+          avgReputation: avgRep,
+        });
+        setCampaigns(campaignsRes.data || []);
+        setWarmupLogs(logsRes.data || []);
+
+        // Build 7-day chart from real warmup_logs
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+
+        const { data: chartLogs } = await supabase
+          .from("warmup_logs")
+          .select("created_at, type")
+          .gte("created_at", sevenDaysAgo.toISOString())
+          .order("created_at");
+
+        const dayMap: Record<string, { warmup: number; sent: number }> = {};
+        for (let i = 0; i < 7; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() - (6 - i));
+          const key = d.toISOString().slice(0, 10);
+          dayMap[key] = { warmup: 0, sent: 0 };
+        }
+
+        (chartLogs || []).forEach((log) => {
+          const key = log.created_at.slice(0, 10);
+          if (dayMap[key]) {
+            if (log.type === "sent") dayMap[key].warmup++;
+            else dayMap[key].sent++;
+          }
+        });
+
+        setChartData(
+          Object.entries(dayMap).map(([date, vals]) => ({
+            day: new Date(date).toLocaleDateString("en", { weekday: "short" }),
+            warmup: vals.warmup,
+            received: vals.sent,
+          }))
+        );
+      } catch (e: any) {
+        toast({ title: "Error loading dashboard", description: e.message, variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
     };
     load();
   }, [user]);
@@ -55,6 +90,18 @@ export default function Dashboard() {
     { label: "Campaigns", value: stats.campaigns, icon: Megaphone, color: "text-blue-400" },
     { label: "Avg Reputation", value: stats.avgReputation, icon: LayoutDashboard, color: "text-warning" },
   ];
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-40" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24" />)}
+        </div>
+        <Skeleton className="h-[300px]" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -79,7 +126,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">7-Day Activity</CardTitle>
+            <CardTitle className="text-base">7-Day Warmup Activity</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
@@ -96,7 +143,7 @@ export default function Dashboard() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(240,10%,14%)" />
                 <XAxis dataKey="day" stroke="hsl(240,5%,55%)" fontSize={12} />
-                <YAxis stroke="hsl(240,5%,55%)" fontSize={12} />
+                <YAxis stroke="hsl(240,5%,55%)" fontSize={12} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "hsl(240,15%,6%)",
@@ -106,7 +153,7 @@ export default function Dashboard() {
                   }}
                 />
                 <Area type="monotone" dataKey="warmup" stroke="hsl(18,100%,60%)" fill="url(#warmupGrad)" strokeWidth={2} />
-                <Area type="monotone" dataKey="sent" stroke="hsl(160,65%,48%)" fill="url(#sentGrad)" strokeWidth={2} />
+                <Area type="monotone" dataKey="received" stroke="hsl(160,65%,48%)" fill="url(#sentGrad)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -118,7 +165,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent className="max-h-[280px] overflow-auto space-y-3">
             {warmupLogs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No warmup activity yet</p>
+              <p className="text-sm text-muted-foreground">No warmup activity yet — enable warmup on 2+ accounts</p>
             ) : (
               warmupLogs.map((log) => (
                 <div key={log.id} className="flex items-center justify-between text-sm">

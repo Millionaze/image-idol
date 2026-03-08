@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { RefreshCw, Inbox as InboxIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -16,20 +17,36 @@ export default function InboxPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [selectedMsg, setSelectedMsg] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
 
   useEffect(() => {
     if (!user) return;
-    supabase.from("email_accounts").select("id, name, email").then(({ data }) => {
+    supabase.from("email_accounts").select("id, name, email").then(({ data, error }) => {
+      if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
       setAccounts(data || []);
       if (data && data.length > 0) setSelectedAccountId(data[0].id);
+      setLoadingAccounts(false);
     });
   }, [user]);
 
+  const loadMessages = async (accountId: string) => {
+    if (!accountId) return;
+    setLoadingMessages(true);
+    try {
+      const { data, error } = await supabase.from("inbox_messages").select("*").eq("account_id", accountId)
+        .order("received_at", { ascending: false }).limit(50);
+      if (error) throw error;
+      setMessages(data || []);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
   useEffect(() => {
-    if (!selectedAccountId) return;
-    supabase.from("inbox_messages").select("*").eq("account_id", selectedAccountId)
-      .order("received_at", { ascending: false }).limit(50)
-      .then(({ data }) => setMessages(data || []));
+    if (selectedAccountId) loadMessages(selectedAccountId);
   }, [selectedAccountId]);
 
   const syncInbox = async () => {
@@ -38,16 +55,34 @@ export default function InboxPage() {
       const { data, error } = await supabase.functions.invoke("inbox-sync", { body: { account_id: selectedAccountId } });
       if (error) throw error;
       toast({ title: "Sync complete", description: data?.message || "Messages synced" });
-      // Reload messages
-      const { data: msgs } = await supabase.from("inbox_messages").select("*").eq("account_id", selectedAccountId)
-        .order("received_at", { ascending: false }).limit(50);
-      setMessages(msgs || []);
+      await loadMessages(selectedAccountId);
     } catch (e: any) {
       toast({ title: "Sync failed", description: e.message, variant: "destructive" });
     } finally {
       setSyncing(false);
     }
   };
+
+  const selectMessage = async (msg: any) => {
+    setSelectedMsg(msg);
+    if (!msg.is_read) {
+      try {
+        await supabase.from("inbox_messages").update({ is_read: true }).eq("id", msg.id);
+        setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, is_read: true } : m));
+      } catch (e) {
+        // silent — non-critical
+      }
+    }
+  };
+
+  if (loadingAccounts) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-32" />
+        <Skeleton className="h-[400px]" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -71,35 +106,38 @@ export default function InboxPage() {
         </div>
       </div>
 
-      {messages.length === 0 ? (
+      {loadingMessages ? (
+        <div className="space-y-2">
+          {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-20" />)}
+        </div>
+      ) : messages.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <InboxIcon className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">No messages. Hit Sync to fetch recent emails.</p>
+            <p className="font-medium text-lg mb-1">No messages</p>
+            <p className="text-muted-foreground text-sm">Click Sync to fetch your inbox</p>
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-0 lg:grid-cols-5 border border-border rounded-lg overflow-hidden">
-          {/* Message list */}
           <div className="lg:col-span-2 border-r border-border max-h-[600px] overflow-auto bg-card">
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                onClick={() => setSelectedMsg(msg)}
+                onClick={() => selectMessage(msg)}
                 className={cn(
                   "p-4 cursor-pointer border-b border-border hover:bg-secondary transition-colors",
                   selectedMsg?.id === msg.id && "bg-secondary",
                   !msg.is_read && "border-l-2 border-l-primary"
                 )}
               >
-                <p className="text-sm font-medium truncate">{msg.from_name || msg.from_email}</p>
+                <p className={cn("text-sm truncate", !msg.is_read && "font-semibold")}>{msg.from_name || msg.from_email}</p>
                 <p className="text-sm truncate">{msg.subject || "(no subject)"}</p>
                 <p className="text-xs text-muted-foreground mt-1">{new Date(msg.received_at).toLocaleString()}</p>
               </div>
             ))}
           </div>
 
-          {/* Message body */}
           <div className="lg:col-span-3 p-6 min-h-[400px] bg-card">
             {selectedMsg ? (
               <div className="space-y-4">
