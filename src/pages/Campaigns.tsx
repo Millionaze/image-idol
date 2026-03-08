@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,6 +29,7 @@ interface SequenceStep {
 export default function Campaigns() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const location = useLocation();
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
@@ -57,6 +59,20 @@ export default function Campaigns() {
   };
 
   useEffect(() => { load(); }, [user]);
+
+  // Auto-open dialog with imported contacts from Contacts page
+  useEffect(() => {
+    const state = location.state as { importedContacts?: Array<{ email: string; name?: string | null }> } | null;
+    if (state?.importedContacts && state.importedContacts.length > 0) {
+      const contactsRaw = state.importedContacts
+        .map((c) => `${c.email}${c.name ? `, ${c.name}` : ""}`)
+        .join("\n");
+      setForm((f) => ({ ...f, contactsRaw }));
+      setOpen(true);
+      // Clear location state to prevent re-triggering
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   const addStep = () => {
     if (steps.length >= 5) return;

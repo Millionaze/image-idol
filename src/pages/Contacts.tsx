@@ -1,5 +1,6 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -12,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Upload, Trash2, Tag, Search, Download, Users, X, Filter } from "lucide-react";
+import { Plus, Upload, Trash2, Tag, Search, Download, Users, X, Filter, Megaphone, FileUp } from "lucide-react";
 
 interface ContactList {
   id: string;
@@ -36,6 +37,9 @@ export default function Contacts() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [showNewListDialog, setShowNewListDialog] = useState(false);
@@ -280,6 +284,33 @@ export default function Contacts() {
     URL.revokeObjectURL(url);
   }, [filteredContacts]);
 
+  const handleFileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file && (file.type === "text/csv" || file.name.endsWith(".csv"))) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setCsvText(ev.target?.result as string || "");
+      reader.readAsText(file);
+    } else {
+      toast({ title: "Invalid file", description: "Please upload a .csv file", variant: "destructive" });
+    }
+  }, [toast]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setCsvText(ev.target?.result as string || "");
+      reader.readAsText(file);
+    }
+    e.target.value = "";
+  }, []);
+
+  const importToCampaign = useCallback(() => {
+    navigate("/campaigns", { state: { importedContacts: filteredContacts } });
+  }, [navigate, filteredContacts]);
+
   const toggleSelect = (id: string) => {
     setSelectedContacts((prev) => {
       const next = new Set(prev);
@@ -406,8 +437,29 @@ export default function Contacts() {
                           <p className="text-sm text-muted-foreground">
                             Format: <code className="text-xs bg-muted px-1 py-0.5 rounded">email, name, company, tags (semicolon-separated)</code>
                           </p>
+                          {/* Drag and drop zone */}
+                          <div
+                            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50"}`}
+                            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                            onDragLeave={() => setIsDragging(false)}
+                            onDrop={handleFileDrop}
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            <FileUp className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                            <p className="text-sm font-medium text-foreground">
+                              {isDragging ? "Drop your CSV file here" : "Drag & drop a CSV file or click to browse"}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">or paste CSV data below</p>
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept=".csv"
+                              className="hidden"
+                              onChange={handleFileSelect}
+                            />
+                          </div>
                           <Textarea
-                            rows={10}
+                            rows={8}
                             placeholder={"john@example.com, John Doe, Acme Inc, lead;hot\njane@test.com, Jane Smith, ,"}
                             value={csvText}
                             onChange={(e) => setCsvText(e.target.value)}
@@ -440,6 +492,9 @@ export default function Contacts() {
                       </Dialog>
                       <Button variant="outline" size="sm" onClick={exportCsv} disabled={filteredContacts.length === 0}>
                         <Download className="h-4 w-4 mr-1" />Export
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={importToCampaign} disabled={filteredContacts.length === 0}>
+                        <Megaphone className="h-4 w-4 mr-1" />Import to Campaign
                       </Button>
                     </div>
                   </div>
