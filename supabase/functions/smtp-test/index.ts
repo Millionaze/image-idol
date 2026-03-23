@@ -3,6 +3,31 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+async function readResponse(conn: Deno.TcpConn | Deno.TlsConn): Promise<string> {
+  let full = "";
+  const buf = new Uint8Array(4096);
+  while (true) {
+    const n = await conn.read(buf);
+    if (!n) break;
+    full += decoder.decode(buf.subarray(0, n));
+    // Check if we have a complete response (final line has space after code, not dash)
+    const lines = full.trim().split("\r\n");
+    const last = lines[lines.length - 1];
+    if (last.length >= 4 && last[3] === " ") break;
+    // Also break on single-line responses
+    if (lines.length === 1 && last.length >= 3) break;
+  }
+  return full;
+}
+
+async function sendCmd(conn: Deno.TcpConn | Deno.TlsConn, cmd: string): Promise<string> {
+  await conn.write(encoder.encode(cmd + "\r\n"));
+  return await readResponse(conn);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -18,77 +43,92 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Test TCP connectivity to the SMTP server
     let conn: Deno.TcpConn | Deno.TlsConn;
     try {
-      if (smtp_secure) {
+      // Connect
+      if (smtp_secure && smtp_port === 465) {
         conn = await Deno.connectTls({ hostname: smtp_host, port: smtp_port });
       } else {
         conn = await Deno.connect({ hostname: smtp_host, port: smtp_port });
       }
 
-      // Read the SMTP greeting (should start with "220")
-      const buf = new Uint8Array(1024);
-      const n = await conn.read(buf);
-      const greeting = n ? new TextDecoder().decode(buf.subarray(0, n)) : "";
-
+      // Read greeting
+      const greeting = await readResponse(conn);
+      console.log("SMTP greeting:", greeting.trim());
       if (!greeting.startsWith("220")) {
         conn.close();
-        return new Response(JSON.stringify({ success: false, error: `Unexpected SMTP greeting: ${greeting.trim()}` }), {
-          status: 200,
+        return new Response(JSON.stringify({ success: false, error: `Unexpected greeting: ${greeting.trim()}` }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // Send EHLO
-      const encoder = new TextEncoder();
-      await conn.write(encoder.encode(`EHLO mailforge\r\n`));
-      const ehloBuf = new Uint8Array(2048);
-      await conn.read(ehloBuf);
+      // EHLO
+      let ehlo = await sendCmd(conn, "EHLO mailforge");
+      console.log("EHLO response:", ehlo.trim());
 
-      // Attempt AUTH LOGIN
-      await conn.write(encoder.encode(`AUTH LOGIN\r\n`));
-      const authBuf = new Uint8Array(1024);
-      const authN = await conn.read(authBuf);
-      const authResp = authN ? new TextDecoder().decode(authBuf.subarray(0, authN)) : "";
-
-      if (authResp.startsWith("334")) {
-        // Send username (base64)
-        await conn.write(encoder.encode(btoa(username) + "\r\n"));
-        const userBuf = new Uint8Array(1024);
-        await conn.read(userBuf);
-
-        // Send password (base64)
-        await conn.write(encoder.encode(btoa(password) + "\r\n"));
-        const passBuf = new Uint8Array(1024);
-        const passN = await conn.read(passBuf);
-        const passResp = passN ? new TextDecoder().decode(passBuf.subarray(0, passN)) : "";
-
-        if (!passResp.startsWith("235")) {
-          conn.close();
-          return new Response(JSON.stringify({ success: false, error: "Authentication failed — check username and password" }), {
-            status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+      // STARTTLS if needed (port 587 or server advertises it on plain connection)
+      if (!smtp_secure || smtp_port === 587) {
+        if (ehlo.includes("STARTTLS")) {
+          const tlsResp = await sendCmd(conn, "STARTTLS");
+          console.log("STARTTLS response:", tlsResp.trim());
+          if (tlsResp.startsWith("220")) {
+            conn = await Deno.startTls(conn as Deno.TcpConn, { hostname: smtp_host });
+            // Re-EHLO after TLS upgrade
+            ehlo = await sendCmd(conn, "EHLO mailforge");
+            console.log("Post-TLS EHLO:", ehlo.trim());
+          }
         }
       }
 
-      // Send QUIT
-      await conn.write(encoder.encode("QUIT\r\n"));
+      // Try AUTH LOGIN first
+      let authSuccess = false;
+      const authLoginResp = await sendCmd(conn, "AUTH LOGIN");
+      console.log("AUTH LOGIN response:", authLoginResp.trim());
+
+      if (authLoginResp.startsWith("334")) {
+        // Send username
+        const userResp = await sendCmd(conn, btoa(username));
+        if (userResp.startsWith("334")) {
+          // Send password
+          const passResp = await sendCmd(conn, btoa(password));
+          console.log("AUTH LOGIN result:", passResp.trim());
+          if (passResp.startsWith("235")) {
+            authSuccess = true;
+          }
+        }
+      }
+
+      // Fallback to AUTH PLAIN
+      if (!authSuccess) {
+        const plainToken = btoa(`\0${username}\0${password}`);
+        const plainResp = await sendCmd(conn, `AUTH PLAIN ${plainToken}`);
+        console.log("AUTH PLAIN result:", plainResp.trim());
+        if (plainResp.startsWith("235")) {
+          authSuccess = true;
+        }
+      }
+
+      if (!authSuccess) {
+        conn.close();
+        return new Response(JSON.stringify({ success: false, error: "Authentication failed — check username and password" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      await sendCmd(conn, "QUIT");
       conn.close();
 
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch (connError: any) {
+      console.error("SMTP test error:", connError.message);
       return new Response(JSON.stringify({ success: false, error: `Connection failed: ${connError.message}` }), {
-        status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
   } catch (error: any) {
     return new Response(JSON.stringify({ success: false, error: error.message }), {
-      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
