@@ -1,0 +1,1 @@
+UPDATE email_accounts SET last_synced_uid = 0;
