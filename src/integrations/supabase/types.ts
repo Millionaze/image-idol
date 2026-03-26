@@ -219,6 +219,7 @@ export type Database = {
           id: string
           imap_host: string | null
           imap_port: number | null
+          last_synced_uid: number
           mark_important_rate: number
           name: string
           password: string
@@ -245,6 +246,7 @@ export type Database = {
           id?: string
           imap_host?: string | null
           imap_port?: number | null
+          last_synced_uid?: number
           mark_important_rate?: number
           name: string
           password: string
@@ -271,6 +273,7 @@ export type Database = {
           id?: string
           imap_host?: string | null
           imap_port?: number | null
+          last_synced_uid?: number
           mark_important_rate?: number
           name?: string
           password?: string
@@ -302,6 +305,7 @@ export type Database = {
           id: string
           is_read: boolean
           is_warmup: boolean
+          message_uid: string | null
           received_at: string
           subject: string | null
         }
@@ -313,6 +317,7 @@ export type Database = {
           id?: string
           is_read?: boolean
           is_warmup?: boolean
+          message_uid?: string | null
           received_at?: string
           subject?: string | null
         }
@@ -324,6 +329,7 @@ export type Database = {
           id?: string
           is_read?: boolean
           is_warmup?: boolean
+          message_uid?: string | null
           received_at?: string
           subject?: string | null
         }
