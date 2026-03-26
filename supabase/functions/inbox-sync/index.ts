@@ -8,73 +8,98 @@ const corsHeaders = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// Read all available data from connection with a timeout
-async function readResponse(conn: Deno.TlsConn | Deno.Conn, timeoutMs = 10000): Promise<string> {
-  const buf = new Uint8Array(65536);
-  let result = "";
-  const deadline = Date.now() + timeoutMs;
+/** Buffered IMAP reader — keeps leftover bytes between reads */
+class ImapReader {
+  private conn: Deno.TlsConn | Deno.Conn;
+  private buffer = "";
 
-  while (Date.now() < deadline) {
-    try {
-      const n = await Promise.race([
-        conn.read(buf),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.max(100, deadline - Date.now())))
-      ]);
-      if (n === null) break;
-      if (n === 0) break;
-      result += decoder.decode(buf.subarray(0, n as number));
-      // Check if we have a complete response (ends with \r\n after a tagged or untagged line)
-      if (result.endsWith("\r\n")) {
-        // Give a tiny bit more time to see if more data follows
-        await new Promise(r => setTimeout(r, 50));
-        // Try one more non-blocking read
-        const extra = await Promise.race([
-          conn.read(buf),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 100))
-        ]);
-        if (extra !== null && (extra as number) > 0) {
-          result += decoder.decode(buf.subarray(0, extra as number));
+  constructor(conn: Deno.TlsConn | Deno.Conn) {
+    this.conn = conn;
+  }
+
+  setConn(conn: Deno.TlsConn | Deno.Conn) {
+    this.conn = conn;
+  }
+
+  /** Read more data from the socket into the internal buffer */
+  private async fillBuffer(timeoutMs: number): Promise<boolean> {
+    const buf = new Uint8Array(65536);
+    return new Promise<boolean>((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (!done) { done = true; resolve(false); }
+      }, timeoutMs);
+
+      this.conn.read(buf).then((n) => {
+        clearTimeout(timer);
+        if (done) return; // timeout already fired
+        done = true;
+        if (n === null || n === 0) {
+          resolve(false);
         } else {
-          break;
+          this.buffer += decoder.decode(buf.subarray(0, n));
+          resolve(true);
+        }
+      }).catch(() => {
+        clearTimeout(timer);
+        if (!done) { done = true; resolve(false); }
+      });
+    });
+  }
+
+  /** Read lines until we see one starting with the given tag */
+  async readUntilTag(tag: string, timeoutMs = 30000): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      // Check if we already have the tagged response in buffer
+      const lines = this.buffer.split("\r\n");
+      for (const line of lines) {
+        if (line.startsWith(`${tag} OK`) || line.startsWith(`${tag} NO`) || line.startsWith(`${tag} BAD`)) {
+          // Find the position after this tagged line
+          const idx = this.buffer.indexOf(line) + line.length;
+          // Consume up to and including the \r\n after the tagged line
+          const nextCrlf = this.buffer.indexOf("\r\n", idx);
+          const result = this.buffer.substring(0, nextCrlf >= 0 ? nextCrlf + 2 : this.buffer.length);
+          this.buffer = nextCrlf >= 0 ? this.buffer.substring(nextCrlf + 2) : "";
+          return result;
         }
       }
-    } catch {
-      break;
-    }
-  }
-  return result;
-}
 
-// Read until we see the tagged response line
-async function readTaggedResponse(conn: Deno.TlsConn | Deno.Conn, tag: string, timeoutMs = 15000): Promise<string> {
-  const buf = new Uint8Array(65536);
-  let result = "";
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    const remaining = Math.max(100, deadline - Date.now());
-    const n = await Promise.race([
-      conn.read(buf),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), remaining))
-    ]);
-    if (n === null) break;
-    if (n === 0) break;
-    result += decoder.decode(buf.subarray(0, n as number));
-    // Check if tagged response has arrived
-    const lines = result.split("\r\n");
-    for (const line of lines) {
-      if (line.startsWith(`${tag} OK`) || line.startsWith(`${tag} NO`) || line.startsWith(`${tag} BAD`)) {
-        return result;
+      // Need more data
+      const remaining = Math.max(500, deadline - Date.now());
+      const got = await this.fillBuffer(remaining);
+      if (!got && this.buffer.length > 0) {
+        // No more data coming, return what we have
+        break;
       }
+      if (!got) break;
     }
-  }
-  return result;
-}
 
-async function sendCommand(conn: Deno.TlsConn | Deno.Conn, tag: string, command: string): Promise<string> {
-  const line = `${tag} ${command}\r\n`;
-  await conn.write(encoder.encode(line));
-  return await readTaggedResponse(conn, tag);
+    // Return whatever we have (caller will check for tag)
+    const result = this.buffer;
+    this.buffer = "";
+    return result;
+  }
+
+  /** Read initial greeting (untagged, starts with "* OK") */
+  async readGreeting(timeoutMs = 10000): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.buffer.includes("\r\n")) {
+        const idx = this.buffer.indexOf("\r\n");
+        const line = this.buffer.substring(0, idx + 2);
+        this.buffer = this.buffer.substring(idx + 2);
+        return line;
+      }
+      const remaining = Math.max(500, deadline - Date.now());
+      const got = await this.fillBuffer(remaining);
+      if (!got) break;
+    }
+    const result = this.buffer;
+    this.buffer = "";
+    return result;
+  }
 }
 
 function checkOk(response: string, tag: string): void {
@@ -85,10 +110,14 @@ function checkOk(response: string, tag: string): void {
       throw new Error(`IMAP error: ${line}`);
     }
   }
-  throw new Error(`No tagged response found for ${tag} in: ${response.substring(0, 200)}`);
+  throw new Error(`No tagged response for ${tag}. Response (first 300 chars): ${response.substring(0, 300)}`);
 }
 
-// Parse "From" header — handles "Name <email>" and bare "email" formats
+async function sendCommand(reader: ImapReader, conn: Deno.TlsConn | Deno.Conn, tag: string, command: string): Promise<string> {
+  await conn.write(encoder.encode(`${tag} ${command}\r\n`));
+  return await reader.readUntilTag(tag, 30000);
+}
+
 function parseFrom(headerBlock: string): { name: string | null; email: string | null } {
   const fromMatch = headerBlock.match(/^From:\s*(.+)$/mi);
   if (!fromMatch) return { name: null, email: null };
@@ -132,12 +161,11 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
-    const userId = claimsData.claims.sub;
+    const userId = user.id;
 
     const { account_id } = await req.json();
     if (!account_id) {
@@ -149,7 +177,6 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Fetch account details
     const { data: account, error: accError } = await supabaseAdmin
       .from("email_accounts")
       .select("*")
@@ -168,14 +195,13 @@ Deno.serve(async (req) => {
     const lastSyncedUid = (account as any).last_synced_uid || 0;
 
     if (!imapHost) {
-      return new Response(JSON.stringify({ error: "IMAP host not configured for this account. Please add IMAP host in account settings." }), {
+      return new Response(JSON.stringify({ error: "IMAP host not configured for this account." }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    console.log(`Connecting to IMAP server ${imapHost}:${imapPort} for account ${account.email}`);
+    console.log(`Connecting to IMAP ${imapHost}:${imapPort} for ${account.email}`);
 
-    // Connect via TLS (port 993) or plain
     let conn: Deno.TlsConn | Deno.Conn;
     if (imapPort === 993) {
       conn = await Deno.connectTls({ hostname: imapHost, port: imapPort });
@@ -183,19 +209,23 @@ Deno.serve(async (req) => {
       conn = await Deno.connect({ hostname: imapHost, port: imapPort });
     }
 
+    const reader = new ImapReader(conn);
+
     try {
       // Read greeting
-      const greeting = await readResponse(conn, 5000);
-      console.log("IMAP greeting:", greeting.substring(0, 200));
+      const greeting = await reader.readGreeting(10000);
+      console.log("Greeting:", greeting.trim());
       if (!greeting.includes("OK")) {
-        throw new Error(`IMAP server rejected connection: ${greeting.substring(0, 200)}`);
+        throw new Error(`Server rejected connection: ${greeting.substring(0, 200)}`);
       }
 
       // STARTTLS for non-993 ports
       if (imapPort !== 993) {
-        const starttlsResp = await sendCommand(conn, "T0", "STARTTLS");
+        await conn.write(encoder.encode("T0 STARTTLS\r\n"));
+        const starttlsResp = await reader.readUntilTag("T0", 10000);
         if (starttlsResp.includes("T0 OK")) {
           conn = await Deno.startTls(conn as Deno.Conn, { hostname: imapHost });
+          reader.setConn(conn);
         }
       }
 
@@ -204,70 +234,62 @@ Deno.serve(async (req) => {
 
       // LOGIN
       const loginTag = nextTag();
-      const loginResp = await sendCommand(conn, loginTag, `LOGIN "${username.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" "${password.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
+      const escapedUser = username.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const escapedPass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const loginResp = await sendCommand(reader, conn, loginTag, `LOGIN "${escapedUser}" "${escapedPass}"`);
+      console.log("LOGIN response tag line:", loginResp.split("\r\n").find(l => l.startsWith(loginTag)) || "(none)");
       checkOk(loginResp, loginTag);
-      console.log("IMAP login successful");
 
       // SELECT INBOX
       const selectTag = nextTag();
-      const selectResp = await sendCommand(conn, selectTag, "SELECT INBOX");
+      const selectResp = await sendCommand(reader, conn, selectTag, "SELECT INBOX");
       checkOk(selectResp, selectTag);
 
-      // Extract EXISTS count
       const existsMatch = selectResp.match(/\*\s+(\d+)\s+EXISTS/i);
       const totalMessages = existsMatch ? parseInt(existsMatch[1]) : 0;
-      console.log(`INBOX has ${totalMessages} messages, last synced UID: ${lastSyncedUid}`);
+      console.log(`INBOX: ${totalMessages} messages, last synced UID: ${lastSyncedUid}`);
 
       if (totalMessages === 0) {
-        // Logout
-        const logoutTag = nextTag();
-        await sendCommand(conn, logoutTag, "LOGOUT");
+        try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
         return new Response(JSON.stringify({ message: "Inbox is empty", synced: 0 }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // UID SEARCH for new messages
+      // UID SEARCH
       const searchTag = nextTag();
       let searchCmd: string;
       if (lastSyncedUid > 0) {
         searchCmd = `UID SEARCH UID ${lastSyncedUid + 1}:*`;
       } else {
-        // First sync — get last 50 messages by sequence number
         const startSeq = Math.max(1, totalMessages - 49);
         searchCmd = `UID SEARCH ${startSeq}:*`;
       }
-      const searchResp = await sendCommand(conn, searchTag, searchCmd);
+      const searchResp = await sendCommand(reader, conn, searchTag, searchCmd);
       checkOk(searchResp, searchTag);
 
-      // Parse UIDs from SEARCH response
       const searchLine = searchResp.split("\r\n").find(l => l.startsWith("* SEARCH"));
       const uids: number[] = [];
       if (searchLine) {
         const parts = searchLine.replace("* SEARCH", "").trim().split(/\s+/);
         for (const p of parts) {
           const uid = parseInt(p);
-          if (!isNaN(uid) && uid > lastSyncedUid) {
-            uids.push(uid);
-          }
+          if (!isNaN(uid) && uid > lastSyncedUid) uids.push(uid);
         }
       }
 
-      console.log(`Found ${uids.length} new UIDs to fetch`);
+      console.log(`Found ${uids.length} new UIDs`);
 
       if (uids.length === 0) {
-        const logoutTag = nextTag();
-        await sendCommand(conn, logoutTag, "LOGOUT");
+        try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
         return new Response(JSON.stringify({ message: "No new messages", synced: 0 }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // Limit to 50 messages per sync
       const fetchUids = uids.slice(0, 50);
       let maxUid = lastSyncedUid;
 
-      // Fetch in batches of 10
       const messages: Array<{
         account_id: string;
         from_email: string | null;
@@ -282,25 +304,19 @@ Deno.serve(async (req) => {
         const batch = fetchUids.slice(i, i + 10);
         const uidList = batch.join(",");
         const fetchTag = nextTag();
-
-        // Fetch headers and body text
         const fetchResp = await sendCommand(
-          conn,
-          fetchTag,
+          reader, conn, fetchTag,
           `UID FETCH ${uidList} (UID BODY[HEADER.FIELDS (FROM SUBJECT DATE)] BODY[TEXT])`
         );
 
-        // Parse fetch responses — split by "* N FETCH"
         const fetchBlocks = fetchResp.split(/\*\s+\d+\s+FETCH\s+/i).filter(b => b.trim());
 
         for (const block of fetchBlocks) {
-          // Extract UID
           const uidMatch = block.match(/UID\s+(\d+)/i);
           if (!uidMatch) continue;
           const uid = parseInt(uidMatch[1]);
           if (uid > maxUid) maxUid = uid;
 
-          // Extract header block (between BODY[HEADER...] and the next BODY or closing paren)
           const headerMatch = block.match(/BODY\[HEADER\.FIELDS\s+\([^)]+\)\]\s+\{(\d+)\}\r\n([\s\S]*?)(?=\r\n\s*BODY\[TEXT\]|\r\n\)|\r\nA\d+)/i);
           const headerBlock = headerMatch ? headerMatch[2] : block;
 
@@ -308,12 +324,10 @@ Deno.serve(async (req) => {
           const subject = parseSubject(headerBlock);
           const date = parseDate(headerBlock);
 
-          // Extract body text
           let bodyText: string | null = null;
           const bodyMatch = block.match(/BODY\[TEXT\]\s+\{(\d+)\}\r\n([\s\S]*?)(?=\r\n\)|\r\nA\d+)/i);
           if (bodyMatch) {
             bodyText = bodyMatch[2].trim();
-            // Truncate very long bodies
             if (bodyText.length > 10000) {
               bodyText = bodyText.substring(0, 10000) + "\n...[truncated]";
             }
@@ -332,32 +346,26 @@ Deno.serve(async (req) => {
       }
 
       // Logout
-      const logoutTag = nextTag();
-      try { await sendCommand(conn, logoutTag, "LOGOUT"); } catch { /* ignore logout errors */ }
+      try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
 
-      console.log(`Parsed ${messages.length} messages, inserting into database`);
+      console.log(`Parsed ${messages.length} messages, inserting`);
 
-      // Upsert messages (deduplicate by message_uid)
       if (messages.length > 0) {
         const { error: insertError } = await supabaseAdmin
           .from("inbox_messages")
           .upsert(messages, { onConflict: "account_id,message_uid", ignoreDuplicates: true });
 
         if (insertError) {
-          console.error("Insert error:", insertError);
-          // Fall back to individual inserts if upsert fails
+          console.error("Upsert error:", insertError);
           let inserted = 0;
           for (const msg of messages) {
-            const { error: singleErr } = await supabaseAdmin
-              .from("inbox_messages")
-              .insert(msg);
+            const { error: singleErr } = await supabaseAdmin.from("inbox_messages").insert(msg);
             if (!singleErr) inserted++;
           }
-          console.log(`Fallback: inserted ${inserted}/${messages.length} messages`);
+          console.log(`Fallback: inserted ${inserted}/${messages.length}`);
         }
       }
 
-      // Update last_synced_uid
       if (maxUid > lastSyncedUid) {
         await supabaseAdmin
           .from("email_accounts")
@@ -374,7 +382,7 @@ Deno.serve(async (req) => {
       });
 
     } finally {
-      try { conn.close(); } catch { /* ignore */ }
+      try { conn.close(); } catch {}
     }
 
   } catch (error: any) {
