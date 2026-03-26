@@ -8,81 +8,53 @@ const corsHeaders = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** Buffered IMAP reader — keeps leftover bytes between reads */
+// ── Buffered IMAP reader ──
 class ImapReader {
   private conn: Deno.TlsConn | Deno.Conn;
   private buffer = "";
+  constructor(conn: Deno.TlsConn | Deno.Conn) { this.conn = conn; }
+  setConn(conn: Deno.TlsConn | Deno.Conn) { this.conn = conn; }
 
-  constructor(conn: Deno.TlsConn | Deno.Conn) {
-    this.conn = conn;
-  }
-
-  setConn(conn: Deno.TlsConn | Deno.Conn) {
-    this.conn = conn;
-  }
-
-  /** Read more data from the socket into the internal buffer */
   private async fillBuffer(timeoutMs: number): Promise<boolean> {
     const buf = new Uint8Array(65536);
     return new Promise<boolean>((resolve) => {
       let done = false;
-      const timer = setTimeout(() => {
-        if (!done) { done = true; resolve(false); }
-      }, timeoutMs);
-
+      const timer = setTimeout(() => { if (!done) { done = true; resolve(false); } }, timeoutMs);
       this.conn.read(buf).then((n) => {
         clearTimeout(timer);
-        if (done) return; // timeout already fired
+        if (done) return;
         done = true;
-        if (n === null || n === 0) {
-          resolve(false);
-        } else {
+        if (n === null || n === 0) { resolve(false); } else {
           this.buffer += decoder.decode(buf.subarray(0, n));
           resolve(true);
         }
-      }).catch(() => {
-        clearTimeout(timer);
-        if (!done) { done = true; resolve(false); }
-      });
+      }).catch(() => { clearTimeout(timer); if (!done) { done = true; resolve(false); } });
     });
   }
 
-  /** Read lines until we see one starting with the given tag */
   async readUntilTag(tag: string, timeoutMs = 30000): Promise<string> {
     const deadline = Date.now() + timeoutMs;
-
     while (Date.now() < deadline) {
-      // Check if we already have the tagged response in buffer
       const lines = this.buffer.split("\r\n");
       for (const line of lines) {
         if (line.startsWith(`${tag} OK`) || line.startsWith(`${tag} NO`) || line.startsWith(`${tag} BAD`)) {
-          // Find the position after this tagged line
           const idx = this.buffer.indexOf(line) + line.length;
-          // Consume up to and including the \r\n after the tagged line
           const nextCrlf = this.buffer.indexOf("\r\n", idx);
           const result = this.buffer.substring(0, nextCrlf >= 0 ? nextCrlf + 2 : this.buffer.length);
           this.buffer = nextCrlf >= 0 ? this.buffer.substring(nextCrlf + 2) : "";
           return result;
         }
       }
-
-      // Need more data
       const remaining = Math.max(500, deadline - Date.now());
       const got = await this.fillBuffer(remaining);
-      if (!got && this.buffer.length > 0) {
-        // No more data coming, return what we have
-        break;
-      }
+      if (!got && this.buffer.length > 0) break;
       if (!got) break;
     }
-
-    // Return whatever we have (caller will check for tag)
     const result = this.buffer;
     this.buffer = "";
     return result;
   }
 
-  /** Read initial greeting (untagged, starts with "* OK") */
   async readGreeting(timeoutMs = 10000): Promise<string> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -103,12 +75,10 @@ class ImapReader {
 }
 
 function checkOk(response: string, tag: string): void {
-  const lines = response.split("\r\n");
-  for (const line of lines) {
+  for (const line of response.split("\r\n")) {
     if (line.startsWith(`${tag} OK`)) return;
-    if (line.startsWith(`${tag} NO`) || line.startsWith(`${tag} BAD`)) {
+    if (line.startsWith(`${tag} NO`) || line.startsWith(`${tag} BAD`))
       throw new Error(`IMAP error: ${line}`);
-    }
   }
   throw new Error(`No tagged response for ${tag}. Response (first 300 chars): ${response.substring(0, 300)}`);
 }
@@ -118,32 +88,160 @@ async function sendCommand(reader: ImapReader, conn: Deno.TlsConn | Deno.Conn, t
   return await reader.readUntilTag(tag, 30000);
 }
 
+// ── RFC 2047 header decoding ──
+function decodeRfc2047(raw: string): string {
+  return raw.replace(/=\?([^?]+)\?(B|Q)\?([^?]*)\?=/gi, (_match, _charset, encoding, encoded) => {
+    try {
+      if (encoding.toUpperCase() === "B") {
+        return atob(encoded);
+      }
+      // Q encoding
+      return encoded.replace(/_/g, " ").replace(/=([0-9A-Fa-f]{2})/g, (_: string, hex: string) =>
+        String.fromCharCode(parseInt(hex, 16))
+      );
+    } catch { return encoded; }
+  });
+}
+
+// ── Quoted-printable decoder ──
+function decodeQuotedPrintable(text: string): string {
+  return text
+    .replace(/=\r?\n/g, "") // soft line breaks
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+// ── Base64 decoder ──
+function decodeBase64(text: string): string {
+  try {
+    const cleaned = text.replace(/\s/g, "");
+    return atob(cleaned);
+  } catch { return text; }
+}
+
+// ── Strip HTML tags to plain text ──
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ── MIME parser: extract readable body from raw message ──
+function parseMimeBody(rawBody: string, headerBlock: string): string {
+  // Get content-type from headers
+  const ctMatch = headerBlock.match(/^Content-Type:\s*(.+?)(?:\r?\n(?!\s)|\r?\n$)/ims);
+  const contentType = ctMatch ? ctMatch[1].replace(/\s+/g, " ").trim() : "";
+
+  // Get transfer encoding from headers
+  const cteMatch = headerBlock.match(/^Content-Transfer-Encoding:\s*(\S+)/mi);
+  const transferEncoding = cteMatch ? cteMatch[1].trim().toLowerCase() : "7bit";
+
+  // Check if multipart
+  const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/i);
+
+  if (boundaryMatch) {
+    const boundary = boundaryMatch[1];
+    return extractFromMultipart(rawBody, boundary);
+  }
+
+  // Single part — decode directly
+  return decodePart(rawBody, transferEncoding, contentType);
+}
+
+function extractFromMultipart(body: string, boundary: string): string {
+  const delim = "--" + boundary;
+  const parts = body.split(delim);
+  
+  let plainText = "";
+  let htmlText = "";
+
+  for (const part of parts) {
+    if (part.startsWith("--") || part.trim() === "") continue;
+
+    // Split part headers from part body
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd === -1) continue;
+
+    const partHeaders = part.substring(0, headerEnd);
+    const partBody = part.substring(headerEnd + 4);
+
+    const partCtMatch = partHeaders.match(/Content-Type:\s*([^;\r\n]+)/i);
+    const partCt = partCtMatch ? partCtMatch[1].trim().toLowerCase() : "";
+    
+    const partCteMatch = partHeaders.match(/Content-Transfer-Encoding:\s*(\S+)/i);
+    const partCte = partCteMatch ? partCteMatch[1].trim().toLowerCase() : "7bit";
+
+    // Check for nested multipart
+    const nestedBoundary = partHeaders.match(/boundary="?([^";\s]+)"?/i);
+    if (nestedBoundary) {
+      const nested = extractFromMultipart(partBody, nestedBoundary[1]);
+      if (nested) return nested;
+      continue;
+    }
+
+    if (partCt.includes("text/plain")) {
+      plainText = decodePart(partBody, partCte, partCt);
+    } else if (partCt.includes("text/html")) {
+      htmlText = decodePart(partBody, partCte, partCt);
+    }
+    // skip attachments, images, etc.
+  }
+
+  if (plainText.trim()) return plainText.trim();
+  if (htmlText.trim()) return htmlToPlainText(htmlText);
+  return "";
+}
+
+function decodePart(body: string, encoding: string, contentType: string): string {
+  // Remove trailing boundary markers
+  let cleaned = body.replace(/--[^\r\n]+--\s*$/, "").trim();
+
+  if (encoding === "quoted-printable") {
+    cleaned = decodeQuotedPrintable(cleaned);
+  } else if (encoding === "base64") {
+    cleaned = decodeBase64(cleaned);
+  }
+
+  // If it's HTML, convert to plain text
+  if (contentType.toLowerCase().includes("text/html")) {
+    cleaned = htmlToPlainText(cleaned);
+  }
+
+  return cleaned;
+}
+
+// ── Header parsers ──
 function parseFrom(headerBlock: string): { name: string | null; email: string | null } {
   const fromMatch = headerBlock.match(/^From:\s*(.+)$/mi);
   if (!fromMatch) return { name: null, email: null };
-  const raw = fromMatch[1].trim();
+  const raw = decodeRfc2047(fromMatch[1].trim());
   const angleMatch = raw.match(/^"?([^"<]*)"?\s*<([^>]+)>/);
-  if (angleMatch) {
-    return { name: angleMatch[1].trim() || null, email: angleMatch[2].trim() };
-  }
+  if (angleMatch) return { name: angleMatch[1].trim() || null, email: angleMatch[2].trim() };
   return { name: null, email: raw };
 }
 
 function parseSubject(headerBlock: string): string | null {
   const m = headerBlock.match(/^Subject:\s*(.+)$/mi);
-  return m ? m[1].trim() : null;
+  return m ? decodeRfc2047(m[1].trim()) : null;
 }
 
 function parseDate(headerBlock: string): string | null {
   const m = headerBlock.match(/^Date:\s*(.+)$/mi);
   if (!m) return null;
-  try {
-    return new Date(m[1].trim()).toISOString();
-  } catch {
-    return new Date().toISOString();
-  }
+  try { return new Date(m[1].trim()).toISOString(); } catch { return new Date().toISOString(); }
 }
 
+// ── Main handler ──
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -178,11 +276,7 @@ Deno.serve(async (req) => {
     );
 
     const { data: account, error: accError } = await supabaseAdmin
-      .from("email_accounts")
-      .select("*")
-      .eq("id", account_id)
-      .eq("user_id", userId)
-      .single();
+      .from("email_accounts").select("*").eq("id", account_id).eq("user_id", userId).single();
 
     if (accError || !account) {
       return new Response(JSON.stringify({ error: "Account not found or access denied" }), { status: 404, headers: corsHeaders });
@@ -212,14 +306,10 @@ Deno.serve(async (req) => {
     const reader = new ImapReader(conn);
 
     try {
-      // Read greeting
       const greeting = await reader.readGreeting(10000);
       console.log("Greeting:", greeting.trim());
-      if (!greeting.includes("OK")) {
-        throw new Error(`Server rejected connection: ${greeting.substring(0, 200)}`);
-      }
+      if (!greeting.includes("OK")) throw new Error(`Server rejected connection: ${greeting.substring(0, 200)}`);
 
-      // STARTTLS for non-993 ports
       if (imapPort !== 993) {
         await conn.write(encoder.encode("T0 STARTTLS\r\n"));
         const starttlsResp = await reader.readUntilTag("T0", 10000);
@@ -237,7 +327,6 @@ Deno.serve(async (req) => {
       const escapedUser = username.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const escapedPass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const loginResp = await sendCommand(reader, conn, loginTag, `LOGIN "${escapedUser}" "${escapedPass}"`);
-      console.log("LOGIN response tag line:", loginResp.split("\r\n").find(l => l.startsWith(loginTag)) || "(none)");
       checkOk(loginResp, loginTag);
 
       // SELECT INBOX
@@ -271,8 +360,7 @@ Deno.serve(async (req) => {
       const searchLine = searchResp.split("\r\n").find(l => l.startsWith("* SEARCH"));
       const uids: number[] = [];
       if (searchLine) {
-        const parts = searchLine.replace("* SEARCH", "").trim().split(/\s+/);
-        for (const p of parts) {
+        for (const p of searchLine.replace("* SEARCH", "").trim().split(/\s+/)) {
           const uid = parseInt(p);
           if (!isNaN(uid) && uid > lastSyncedUid) uids.push(uid);
         }
@@ -291,24 +379,21 @@ Deno.serve(async (req) => {
       let maxUid = lastSyncedUid;
 
       const messages: Array<{
-        account_id: string;
-        from_email: string | null;
-        from_name: string | null;
-        subject: string | null;
-        body: string | null;
-        received_at: string;
-        message_uid: string;
+        account_id: string; from_email: string | null; from_name: string | null;
+        subject: string | null; body: string | null; received_at: string; message_uid: string;
       }> = [];
 
+      // Fetch full RFC822 message so we can parse MIME properly
       for (let i = 0; i < fetchUids.length; i += 10) {
         const batch = fetchUids.slice(i, i + 10);
         const uidList = batch.join(",");
         const fetchTag = nextTag();
         const fetchResp = await sendCommand(
           reader, conn, fetchTag,
-          `UID FETCH ${uidList} (UID BODY[HEADER.FIELDS (FROM SUBJECT DATE)] BODY[TEXT])`
+          `UID FETCH ${uidList} (UID RFC822)`
         );
 
+        // Split on FETCH responses
         const fetchBlocks = fetchResp.split(/\*\s+\d+\s+FETCH\s+/i).filter(b => b.trim());
 
         for (const block of fetchBlocks) {
@@ -317,20 +402,44 @@ Deno.serve(async (req) => {
           const uid = parseInt(uidMatch[1]);
           if (uid > maxUid) maxUid = uid;
 
-          const headerMatch = block.match(/BODY\[HEADER\.FIELDS\s+\([^)]+\)\]\s+\{(\d+)\}\r\n([\s\S]*?)(?=\r\n\s*BODY\[TEXT\]|\r\n\)|\r\nA\d+)/i);
-          const headerBlock = headerMatch ? headerMatch[2] : block;
-
-          const from = parseFrom(headerBlock);
-          const subject = parseSubject(headerBlock);
-          const date = parseDate(headerBlock);
-
-          let bodyText: string | null = null;
-          const bodyMatch = block.match(/BODY\[TEXT\]\s+\{(\d+)\}\r\n([\s\S]*?)(?=\r\n\)|\r\nA\d+)/i);
-          if (bodyMatch) {
-            bodyText = bodyMatch[2].trim();
-            if (bodyText.length > 10000) {
-              bodyText = bodyText.substring(0, 10000) + "\n...[truncated]";
+          // Extract RFC822 literal: {size}\r\n<message>
+          const literalMatch = block.match(/RFC822\}\s*\{(\d+)\}\r\n([\s\S]*)/i);
+          let rawMessage = "";
+          if (literalMatch) {
+            rawMessage = literalMatch[2];
+          } else {
+            // Try alternate format
+            const altMatch = block.match(/RFC822\s+\{(\d+)\}\r\n([\s\S]*)/i);
+            if (altMatch) rawMessage = altMatch[2];
+            else {
+              // Fallback: take everything after first \r\n
+              const firstLine = block.indexOf("\r\n");
+              if (firstLine > 0) rawMessage = block.substring(firstLine + 2);
             }
+          }
+
+          if (!rawMessage) continue;
+
+          // Split headers and body
+          const headerBodySep = rawMessage.indexOf("\r\n\r\n");
+          const fullHeaders = headerBodySep > 0 ? rawMessage.substring(0, headerBodySep) : rawMessage;
+          const rawBody = headerBodySep > 0 ? rawMessage.substring(headerBodySep + 4) : "";
+
+          const from = parseFrom(fullHeaders);
+          const subject = parseSubject(fullHeaders);
+          const date = parseDate(fullHeaders);
+
+          let bodyText = "";
+          try {
+            bodyText = parseMimeBody(rawBody, fullHeaders);
+          } catch (e) {
+            console.error("MIME parse error, using raw:", e);
+            bodyText = rawBody.substring(0, 5000);
+          }
+
+          // Truncate
+          if (bodyText.length > 10000) {
+            bodyText = bodyText.substring(0, 10000) + "\n...[truncated]";
           }
 
           messages.push({
@@ -338,22 +447,22 @@ Deno.serve(async (req) => {
             from_email: from.email,
             from_name: from.name,
             subject,
-            body: bodyText,
+            body: bodyText || null,
             received_at: date || new Date().toISOString(),
             message_uid: `${account_id}:${uid}`,
           });
         }
       }
 
-      // Logout
       try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
 
       console.log(`Parsed ${messages.length} messages, inserting`);
 
       if (messages.length > 0) {
+        // Use upsert without ignoreDuplicates so existing broken messages get repaired
         const { error: insertError } = await supabaseAdmin
           .from("inbox_messages")
-          .upsert(messages, { onConflict: "account_id,message_uid", ignoreDuplicates: true });
+          .upsert(messages, { onConflict: "account_id,message_uid" });
 
         if (insertError) {
           console.error("Upsert error:", insertError);
@@ -388,8 +497,7 @@ Deno.serve(async (req) => {
   } catch (error: any) {
     console.error("inbox-sync error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

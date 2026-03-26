@@ -149,7 +149,7 @@ export default function InboxPage() {
                   <p className="text-xs text-muted-foreground">{new Date(selectedMsg.received_at).toLocaleString()}</p>
                 </div>
                 <div className="prose prose-sm prose-invert max-w-none whitespace-pre-wrap text-sm text-foreground">
-                  {selectedMsg.body || "(empty)"}
+                  {cleanBody(selectedMsg.body) || "(empty)"}
                 </div>
               </div>
             ) : (

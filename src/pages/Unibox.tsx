@@ -235,7 +235,7 @@ export default function Unibox() {
                     </p>
                   </div>
                   <div className="prose prose-sm prose-invert max-w-none whitespace-pre-wrap text-sm text-foreground">
-                    {selectedMsg.body || "(empty)"}
+                    {cleanBody(selectedMsg.body) || "(empty)"}
                   </div>
                 </div>
 
