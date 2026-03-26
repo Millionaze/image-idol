@@ -13,6 +13,19 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 
+/** Strip residual MIME artifacts that may survive server-side parsing */
+function cleanBody(raw: string | null): string {
+  if (!raw) return "";
+  return raw
+    .replace(/^Content-Type:.*$/gim, "")
+    .replace(/^Content-Transfer-Encoding:.*$/gim, "")
+    .replace(/^Content-Disposition:.*$/gim, "")
+    .replace(/^MIME-Version:.*$/gim, "")
+    .replace(/--[a-zA-Z0-9_=.+-]{10,}--?/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export default function Unibox() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -235,7 +248,7 @@ export default function Unibox() {
                     </p>
                   </div>
                   <div className="prose prose-sm prose-invert max-w-none whitespace-pre-wrap text-sm text-foreground">
-                    {selectedMsg.body || "(empty)"}
+                    {cleanBody(selectedMsg.body) || "(empty)"}
                   </div>
                 </div>
 
