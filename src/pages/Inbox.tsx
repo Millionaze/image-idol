@@ -9,6 +9,19 @@ import { RefreshCw, Inbox as InboxIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
+/** Strip residual MIME artifacts that may survive server-side parsing */
+function cleanBody(raw: string | null): string {
+  if (!raw) return "";
+  return raw
+    .replace(/^Content-Type:.*$/gim, "")
+    .replace(/^Content-Transfer-Encoding:.*$/gim, "")
+    .replace(/^Content-Disposition:.*$/gim, "")
+    .replace(/^MIME-Version:.*$/gim, "")
+    .replace(/--[a-zA-Z0-9_=.+-]{10,}--?/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export default function InboxPage() {
   const { user } = useAuth();
   const { toast } = useToast();
