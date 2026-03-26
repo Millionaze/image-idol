@@ -271,9 +271,14 @@ export default function Accounts() {
                       Day {a.warmup_ramp_day || 1} · {Math.min((a.warmup_ramp_day || 1) * 2, a.warmup_daily_limit)}/day target · Max {a.warmup_daily_limit}/day
                     </div>
                   )}
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>SMTP: {a.smtp_host}:{a.smtp_port}</span>
-                    <span>Status: {a.status}</span>
+                  <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                    <div className="flex justify-between">
+                      <span>SMTP: {a.smtp_host}:{a.smtp_port}</span>
+                      <span>Status: {a.status}</span>
+                    </div>
+                    {a.imap_host && (
+                      <span>IMAP: {a.imap_host}:{a.imap_port || 993}</span>
+                    )}
                   </div>
 
                   {/* Blacklist Check */}

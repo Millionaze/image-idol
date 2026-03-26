@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Inbox, Send, CheckCheck, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { formatDistanceToNow } from "date-fns";
 
 export default function Unibox() {
   const { user } = useAuth();
@@ -24,6 +25,8 @@ export default function Unibox() {
   const [replyText, setReplyText] = useState("");
   const [replying, setReplying] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const syncingRef = useRef(false);
 
   const loadAll = async () => {
     if (!user) return;
@@ -105,20 +108,31 @@ export default function Unibox() {
     }
   };
 
-  const syncAll = async () => {
+  const syncAll = useCallback(async (silent = false) => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
     setSyncing(true);
     try {
       for (const acc of accounts) {
         await supabase.functions.invoke("inbox-sync", { body: { account_id: acc.id } });
       }
       await loadAll();
-      toast({ title: "Sync complete" });
+      setLastSynced(new Date());
+      if (!silent) toast({ title: "Sync complete" });
     } catch (e: any) {
-      toast({ title: "Sync failed", description: e.message, variant: "destructive" });
+      if (!silent) toast({ title: "Sync failed", description: e.message, variant: "destructive" });
     } finally {
       setSyncing(false);
+      syncingRef.current = false;
     }
-  };
+  }, [accounts]);
+
+  // Auto-sync every 2 minutes
+  useEffect(() => {
+    if (!accounts.length) return;
+    const interval = setInterval(() => syncAll(true), 2 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [accounts, syncAll]);
 
   if (loading) {
     return (
@@ -138,10 +152,17 @@ export default function Unibox() {
             <Badge variant="destructive" className="text-xs">{unreadCount} unread</Badge>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={syncAll} disabled={syncing} className="gap-1.5">
-          <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
-          Sync All
-        </Button>
+        <div className="flex items-center gap-3">
+          {lastSynced && (
+            <span className="text-xs text-muted-foreground">
+              Synced {formatDistanceToNow(lastSynced, { addSuffix: true })}
+            </span>
+          )}
+          <Button variant="outline" size="sm" onClick={() => syncAll(false)} disabled={syncing} className="gap-1.5">
+            <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+            Sync All
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
