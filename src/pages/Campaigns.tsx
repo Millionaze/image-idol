@@ -46,6 +46,7 @@ export default function Campaigns() {
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [aiLoading, setAiLoading] = useState(false);
   const [gateModal, setGateModal] = useState<{ open: boolean; score: number; email: string; campaignId: string }>({ open: false, score: 0, email: "", campaignId: "" });
 
   const load = async () => {
