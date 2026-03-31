@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
       }
 
       // EHLO
-      let ehlo = await sendCmd(conn, "EHLO mailforge");
+      let ehlo = await sendCmd(conn, "EHLO pixelgrowth");
       console.log("EHLO response:", ehlo.trim());
 
       // STARTTLS if needed (port 587 or server advertises it on plain connection)
