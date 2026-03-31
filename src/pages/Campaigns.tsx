@@ -16,16 +16,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Send, Megaphone, Eye, Loader2, Trash2, ArrowDown } from "lucide-react";
+import { Plus, Send, Megaphone, Eye, Loader2, Trash2, ArrowDown, Sparkles, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { WarmupGateModal } from "@/components/warmup/WarmupGateModal";
 import { computeScores } from "@/components/warmup/WarmupReadinessModal";
+
+type ConditionType = "always" | "no_open" | "open_no_reply" | "link_click";
 
 interface SequenceStep {
   subject: string;
   body: string;
   delay_days: number;
   delay_hours: number;
+  condition_type: ConditionType;
 }
 
 export default function Campaigns() {
