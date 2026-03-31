@@ -140,8 +140,8 @@ Return ONLY the email body text, nothing else.`;
       const subjectData = await subjectResp.json();
       const bodyData = await bodyResp.json();
 
-      const subject = is_reply ? "REPLY" : (subjectData.choices?.[0]?.message?.content?.trim() || "Quick hello");
-      const generatedBody = bodyData.choices?.[0]?.message?.content?.trim() || "Hey! Just checking in. Hope all is well!";
+      const subject = is_reply ? "REPLY" : (subjectData.content?.[0]?.text?.trim() || "Quick hello");
+      const generatedBody = bodyData.content?.[0]?.text?.trim() || "Hey! Just checking in. Hope all is well!";
 
       // Check for duplicates if account_id provided
       if (account_id) {
