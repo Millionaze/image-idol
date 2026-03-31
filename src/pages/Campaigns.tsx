@@ -428,7 +428,18 @@ export default function Campaigns() {
                   const rate = c.sent_count > 0 ? Math.round((c.open_count / c.sent_count) * 100) : 0;
                   return (
                     <TableRow key={c.id} className="cursor-pointer" onClick={() => openContactPanel(c)}>
-                      <TableCell className="font-medium">{c.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          {c.name}
+                          {c.paused_reason && (
+                            <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30 gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              Auto-paused
+                            </Badge>
+                          )}
+                        </div>
+                        {c.paused_reason && <p className="text-[10px] text-destructive mt-0.5">{c.paused_reason}</p>}
+                      </TableCell>
                       <TableCell>
                         {c.is_sequence ? (
                           <Badge variant="outline" className="text-xs">Sequence</Badge>
