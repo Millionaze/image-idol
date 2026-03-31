@@ -19,9 +19,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY not configured" }), {
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
+      return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -98,25 +98,33 @@ Return ONLY the email body text, nothing else.`;
 
     // Try up to 3 times to generate non-duplicate content
     for (let attempt = 0; attempt < 3; attempt++) {
+      const anthropicHeaders = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      };
+
       const [subjectResp, bodyResp] = await Promise.all([
-        fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+          headers: anthropicHeaders,
           body: JSON.stringify({
-            model: "google/gemini-2.5-flash-lite",
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 256,
+            system: subjectPrompt,
             messages: [
-              { role: "system", content: subjectPrompt },
               { role: "user", content: `Generate unique content. Attempt ${attempt + 1}. Timestamp: ${Date.now()}` },
             ],
           }),
         }),
-        fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+          headers: anthropicHeaders,
           body: JSON.stringify({
-            model: "google/gemini-2.5-flash-lite",
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1024,
+            system: bodyPrompt,
             messages: [
-              { role: "system", content: bodyPrompt },
               { role: "user", content: `Generate unique content. Attempt ${attempt + 1}. Timestamp: ${Date.now()}` },
             ],
           }),
@@ -132,8 +140,8 @@ Return ONLY the email body text, nothing else.`;
       const subjectData = await subjectResp.json();
       const bodyData = await bodyResp.json();
 
-      const subject = is_reply ? "REPLY" : (subjectData.choices?.[0]?.message?.content?.trim() || "Quick hello");
-      const generatedBody = bodyData.choices?.[0]?.message?.content?.trim() || "Hey! Just checking in. Hope all is well!";
+      const subject = is_reply ? "REPLY" : (subjectData.content?.[0]?.text?.trim() || "Quick hello");
+      const generatedBody = bodyData.content?.[0]?.text?.trim() || "Hey! Just checking in. Hope all is well!";
 
       // Check for duplicates if account_id provided
       if (account_id) {
