@@ -300,28 +300,64 @@ export default function Campaigns() {
               {/* Sequence steps */}
               {form.is_sequence && (
                 <div className="space-y-3">
+                  {/* AI Generate Button */}
+                  <Button variant="outline" size="sm" className="w-full gap-2" disabled={aiLoading} onClick={async () => {
+                    setAiLoading(true);
+                    try {
+                      const { data, error } = await supabase.functions.invoke("generate-email-copy", {
+                        body: { type: "generate-sequence", goal: form.name || "Book a demo call", product: "", audience: "", tone: "Professional" },
+                      });
+                      if (error) throw error;
+                      const content = data?.content || "";
+                      const jsonMatch = content.match(/\[[\s\S]*\]/);
+                      if (jsonMatch) {
+                        const parsed = JSON.parse(jsonMatch[0]);
+                        if (parsed[0]) {
+                          setForm(f => ({ ...f, subject: parsed[0].subject || f.subject, body: parsed[0].body || f.body }));
+                        }
+                        setSteps(parsed.slice(1).map((s: any) => ({
+                          subject: s.subject || "", body: s.body || "",
+                          delay_days: s.delay_days || 2, delay_hours: 0,
+                          condition_type: s.condition_type || "no_open",
+                        })));
+                        toast({ title: "AI sequence generated!", description: `${parsed.length} steps created` });
+                      }
+                    } catch (e: any) {
+                      toast({ title: "AI generation failed", description: e.message, variant: "destructive" });
+                    } finally { setAiLoading(false); }
+                  }}>
+                    {aiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    AI Generate 5-Step Sequence
+                  </Button>
+
                   {steps.map((step, idx) => (
                     <div key={idx} className="space-y-2 border border-border rounded-lg p-3 relative">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <ArrowDown className="h-3 w-3 text-muted-foreground" />
-                          <Label className="text-sm font-medium">Step {idx + 2} — Follow-up</Label>
+                          <Label className="text-sm font-medium">Step {idx + 2}</Label>
                         </div>
                         <Button variant="ghost" size="icon" onClick={() => removeStep(idx)} className="h-6 w-6">
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                      <div className="flex gap-2">
-                        <div className="flex-1 space-y-1">
-                          <Label className="text-xs">Delay</Label>
-                          <div className="flex gap-1">
-                            <Input
-                              type="number" className="w-16" min={0}
-                              value={step.delay_days}
-                              onChange={(e) => updateStep(idx, "delay_days", parseInt(e.target.value) || 0)}
-                            />
-                            <span className="text-xs text-muted-foreground self-center">days</span>
-                          </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Delay (days)</Label>
+                          <Input type="number" className="h-8" min={0} value={step.delay_days}
+                            onChange={(e) => updateStep(idx, "delay_days", parseInt(e.target.value) || 0)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Condition</Label>
+                          <Select value={step.condition_type} onValueChange={(v) => updateStep(idx, "condition_type", v)}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="always">Send always</SelectItem>
+                              <SelectItem value="no_open">If NOT opened</SelectItem>
+                              <SelectItem value="open_no_reply">If opened, no reply</SelectItem>
+                              <SelectItem value="link_click">If clicked link</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                       <div className="space-y-1">
@@ -334,9 +370,9 @@ export default function Campaigns() {
                       </div>
                     </div>
                   ))}
-                  {steps.length < 4 && (
+                  {steps.length < 6 && (
                     <Button variant="outline" size="sm" onClick={addStep} className="w-full">
-                      + Add Follow-up Step
+                      + Add Follow-up Step (max 7 total)
                     </Button>
                   )}
                 </div>
