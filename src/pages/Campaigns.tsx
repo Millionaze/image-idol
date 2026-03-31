@@ -82,8 +82,8 @@ export default function Campaigns() {
   }, [location.state]);
 
   const addStep = () => {
-    if (steps.length >= 5) return;
-    setSteps([...steps, { subject: "", body: "", delay_days: 1, delay_hours: 0 }]);
+    if (steps.length >= 6) return;
+    setSteps([...steps, { subject: "", body: "", delay_days: 1, delay_hours: 0, condition_type: "no_open" as ConditionType }]);
   };
 
   const removeStep = (idx: number) => {
