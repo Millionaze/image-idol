@@ -1,49 +1,19 @@
 
-# Fix unreadable “random code” in received emails
 
-## Why this is happening
-The inbox sync currently fetches `BODY[TEXT]` from IMAP and stores it directly in `inbox_messages.body` (`supabase/functions/inbox-sync/index.ts`).  
-For multipart emails, that payload includes MIME boundaries and part headers (`Content-Type`, `Content-Transfer-Encoding`, etc.), so the UI shows protocol text instead of a clean message.
+# Disable Email Confirmation Requirement
 
-## Implementation plan (step-by-step)
+## What's happening
+Supabase requires email confirmation by default. The user `bellefontainec@gmail.com` signed up but never clicked the confirmation link, so login is blocked with "Email not confirmed."
 
-1. **Improve IMAP fetch payload**
-   - Keep current UID flow, but fetch enough content to parse MIME reliably (raw message body + headers per message part).
-   - Continue batching to stay within Edge Function timeout.
+## Fix
+Disable the "Confirm email" setting in the Supabase Auth dashboard. This is a Supabase project setting, not a code change.
 
-2. **Add MIME parsing in `inbox-sync`**
-   - Parse message headers/body boundary.
-   - Detect multipart (`multipart/alternative`, `multipart/mixed`) and extract the best readable part:
-     - Prefer `text/plain`
-     - Fallback to `text/html` converted to plain text if plain part is missing
-   - Ignore attachment parts.
+**Steps:**
+1. Go to [Supabase Auth Providers](https://supabase.com/dashboard/project/ivyqkprlrosapkmmwkeh/auth/providers)
+2. Under **Email** provider settings, toggle off **"Confirm email"**
+3. Save
 
-3. **Decode transfer encodings**
-   - Decode `quoted-printable` and `base64` body content before saving.
-   - Respect charset when possible (default UTF-8 fallback).
+This lets users log in immediately after signup. The existing unconfirmed user (`bellefontainec@gmail.com`) will also be able to log in right away.
 
-4. **Decode human-facing headers**
-   - Decode RFC 2047 encoded words in `Subject` and `From` so names/subjects are readable.
+No code changes are needed.
 
-5. **Store cleaned content**
-   - Save only cleaned body text to `inbox_messages.body`.
-   - Keep `message_uid` dedupe logic.
-
-6. **Repair already-synced messages**
-   - Add a one-time “reprocess recent messages” sync mode (manual sync path) so old MIME-coded entries are rewritten with parsed body text.
-   - Ensure upsert updates existing rows on `account_id,message_uid` instead of skipping duplicates for repair runs.
-
-7. **Frontend safeguard (optional but recommended)**
-   - Add a lightweight display fallback in Unibox/Inbox to hide obvious MIME artifacts if parsing ever fails (prevents raw protocol dump in UI).
-
-## Technical details
-- **Primary file:** `supabase/functions/inbox-sync/index.ts`
-- **Likely UI files (fallback only):** `src/pages/Unibox.tsx`, `src/pages/Inbox.tsx`
-- **No major schema change required** for the core fix (unless we choose to keep raw body separately for debugging).
-
-## Validation (end-to-end)
-1. Sync an account with known multipart + quoted-printable emails.
-2. Confirm body shows readable text (no boundary markers / MIME headers).
-3. Confirm subject/from render decoded values.
-4. Run manual repair sync and verify previously broken messages are corrected.
-5. Verify full flow end-to-end in Unibox (sync → list → open message → readable content).
