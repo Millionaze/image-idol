@@ -403,7 +403,7 @@ export default function Campaigns() {
                       <TableCell className="text-right">{c.bounce_count}</TableCell>
                       <TableCell>
                         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                          <Button size="sm" variant="outline" onClick={() => sendCampaign(c.id)} disabled={sending === c.id} className="gap-1">
+                          <Button size="sm" variant="outline" onClick={() => trySendCampaign(c.id)} disabled={sending === c.id} className="gap-1">
                             {sending === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                             Send
                           </Button>
