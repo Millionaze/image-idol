@@ -161,7 +161,21 @@ export default function Campaigns() {
     }
   };
 
-  const sendCampaign = async (id: string) => {
+  const trySendCampaign = async (id: string) => {
+    const campaign = campaigns.find((c) => c.id === id);
+    if (!campaign) return;
+    const account = accounts.find((a: any) => a.id === campaign.account_id);
+    if (account) {
+      const scores = computeScores(account, []);
+      if (scores.overall < 70) {
+        setGateModal({ open: true, score: scores.overall, email: account.email, campaignId: id });
+        return;
+      }
+    }
+    await doSendCampaign(id);
+  };
+
+  const doSendCampaign = async (id: string) => {
     setSending(id);
     try {
       const campaign = campaigns.find((c) => c.id === id);
