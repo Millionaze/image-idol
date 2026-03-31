@@ -1,19 +1,17 @@
 
 
-# Disable Email Confirmation Requirement
+# Rename "MailForge" → "Pixel Growth"
 
-## What's happening
-Supabase requires email confirmation by default. The user `bellefontainec@gmail.com` signed up but never clicked the confirmation link, so login is blocked with "Email not confirmed."
+Simple find-and-replace across 5 files:
 
-## Fix
-Disable the "Confirm email" setting in the Supabase Auth dashboard. This is a Supabase project setting, not a code change.
+| File | Change |
+|------|--------|
+| `src/pages/Login.tsx` | `Mail<span className="text-primary">Forge</span>` → `Pixel<span className="text-primary"> Growth</span>` |
+| `src/pages/Register.tsx` | Same branding update |
+| `src/components/AppSidebar.tsx` | Same branding update |
+| `src/pages/tools/AuditReport.tsx` | Replace "MailForge Audit Report" and "MailForge Deliverability Audit" with "Pixel Growth" equivalents |
+| `supabase/functions/smtp-test/index.ts` | Change EHLO identifier from `mailforge` to `pixelgrowth` |
+| `index.html` | Update `<title>` and OG meta tags from "Lovable App" to "Pixel Growth" |
 
-**Steps:**
-1. Go to [Supabase Auth Providers](https://supabase.com/dashboard/project/ivyqkprlrosapkmmwkeh/auth/providers)
-2. Under **Email** provider settings, toggle off **"Confirm email"**
-3. Save
-
-This lets users log in immediately after signup. The existing unconfirmed user (`bellefontainec@gmail.com`) will also be able to log in right away.
-
-No code changes are needed.
+The Flame icon on login/register/sidebar will be kept as-is unless you want a different icon.
 
