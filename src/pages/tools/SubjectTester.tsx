@@ -1,230 +1,316 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Target, Check, X, AlertTriangle, Loader2, Sparkles } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Target, Loader2, Sparkles, Smartphone, Clock, Copy, TrendingUp, AlertTriangle, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
-const SPAM_WORDS = [
-  "free", "guaranteed", "no risk", "limited time", "act now", "click here", "earn money",
-  "make money", "winner", "congratulations", "urgent", "100%", "million dollars", "cash",
-  "prize", "you've been selected", "dear friend", "increase sales", "double your",
-  "extra income", "f r e e", "!!!", "???", "RE:", "FWD:", "buy now", "order now",
-  "special offer", "exclusive deal", "don't miss", "once in a lifetime", "risk free",
-  "no obligation", "no cost", "no credit card", "satisfaction guaranteed", "money back",
-  "lowest price", "bargain", "discount", "save big", "save money", "cheap", "best price",
-  "compare rates", "incredible deal", "offer expires", "while supplies last", "apply now",
-  "get started now", "subscribe now", "sign up free", "join millions", "be your own boss",
-  "work from home", "home based", "online income", "passive income", "financial freedom",
-  "get rich", "get paid", "make $", "earn $", "MLM", "multi-level", "direct marketing",
-  "eliminate debt", "credit score", "refinance", "mortgage rates", "investment opportunity",
-  "stock alert", "forex", "crypto profit", "bitcoin opportunity", "dear valued",
-  "as seen on", "miracle", "amazing", "breakthrough", "revolutionary", "secret",
-  "unbelievable", "incredible", "shocking", "sensational", "you won", "claim your",
-  "verify your account", "confirm your identity", "suspended account", "action required",
-  "important notification", "final notice", "last chance",
-];
-
-interface CheckResult {
-  name: string;
-  passed: boolean;
-  warn?: boolean;
-  detail: string;
+interface SubjectAnalysis {
+  subject: string;
+  spam_score: number;
+  spam_words: Array<{ word: string; explanation?: string }>;
+  predicted_open_rate: string;
+  open_rate_reasoning: string;
+  preview_text_suggestion: string;
+  improved_versions: Array<{ subject: string; explanation: string }>;
+  mobile_preview: string;
 }
 
-function analyzeSubject(subject: string): CheckResult[] {
-  const checks: CheckResult[] = [];
-  const len = subject.length;
-
-  checks.push({
-    name: "Length (6–50 chars)",
-    passed: len >= 6 && len <= 50,
-    detail: `${len} characters`,
-  });
-
-  const foundSpam = SPAM_WORDS.filter((w) => subject.toLowerCase().includes(w.toLowerCase()));
-  checks.push({
-    name: "No spam trigger words",
-    passed: foundSpam.length === 0,
-    detail: foundSpam.length > 0 ? `Found: ${foundSpam.slice(0, 3).join(", ")}${foundSpam.length > 3 ? "..." : ""}` : "Clean",
-  });
-
-  const allCapsWords = subject.split(/\s+/).filter((w) => w.length > 2 && w === w.toUpperCase() && /[A-Z]/.test(w));
-  checks.push({
-    name: "No ALL CAPS words",
-    passed: allCapsWords.length === 0,
-    detail: allCapsWords.length > 0 ? `Found: ${allCapsWords.join(", ")}` : "Clean",
-  });
-
-  const exclCount = (subject.match(/!/g) || []).length;
-  const questCount = (subject.match(/\?/g) || []).length;
-  checks.push({
-    name: "No excessive punctuation",
-    passed: exclCount <= 1 && questCount <= 1,
-    detail: `${exclCount} exclamation, ${questCount} question marks`,
-  });
-
-  const hasEmoji = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(subject);
-  checks.push({
-    name: "No emoji",
-    passed: !hasEmoji,
-    warn: hasEmoji,
-    detail: hasEmoji ? "Some clients may render poorly" : "Clean",
-  });
-
-  const hasToken = /\{\{(name|company)\}\}/.test(subject);
-  checks.push({
-    name: "Personalization token",
-    passed: hasToken,
-    detail: hasToken ? "Contains personalization" : "Add {{name}} or {{company}}",
-  });
-
-  checks.push({
-    name: "Question format",
-    passed: subject.trim().endsWith("?"),
-    detail: subject.trim().endsWith("?") ? "Ends with question" : "Not a question",
-  });
-
-  checks.push({
-    name: "Contains a number",
-    passed: /\d/.test(subject),
-    detail: /\d/.test(subject) ? "Has specificity" : "No numbers found",
-  });
-
-  return checks;
+interface MultiAnalysis {
+  analyses: SubjectAnalysis[];
+  ranking?: Array<{ subject: string; rank: number; reasoning: string }>;
+  ab_recommendation?: { subject_a: string; subject_b: string; reasoning: string };
 }
 
 export default function SubjectTester() {
-  const [subject, setSubject] = useState("");
-  const [debouncedSubject, setDebouncedSubject] = useState("");
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [aiLoading, setAiLoading] = useState(false);
+  const { user } = useAuth();
+  const [input, setInput] = useState("");
+  const [analysis, setAnalysis] = useState<MultiAnalysis | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSubject(subject), 300);
-    return () => clearTimeout(timer);
-  }, [subject]);
+    if (!user) return;
+    supabase.from("subject_tests").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(10)
+      .then(({ data }) => { if (data) setHistory(data); });
+  }, [user]);
 
-  const checks = useMemo(() => {
-    if (!debouncedSubject.trim()) return [];
-    return analyzeSubject(debouncedSubject);
-  }, [debouncedSubject]);
-
-  const score = checks.length > 0 ? Math.round((checks.filter((c) => c.passed).length / checks.length) * 100) : 0;
-  const grade = score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : "D";
-  const gradeColor = score >= 90 ? "hsl(var(--success))" : score >= 75 ? "hsl(var(--chart-3))" : score >= 60 ? "hsl(var(--warning))" : "hsl(var(--destructive))";
-
-  const ringSize = 120;
-  const strokeWidth = 8;
-  const radius = (ringSize - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
-
-  const getAiSuggestions = async () => {
-    if (!subject.trim()) return;
-    setAiLoading(true);
+  const analyze = async () => {
+    if (!input.trim()) return;
+    setLoading(true);
+    setAnalysis(null);
     try {
+      const subjects = input.split("\n").map(s => s.trim()).filter(Boolean).slice(0, 5);
       const { data, error } = await supabase.functions.invoke("generate-email-copy", {
-        body: { type: "subject-rewrite", subject },
+        body: { type: "analyze-subject", subjects: subjects.length === 1 ? subjects[0] : subjects },
       });
       if (error) throw error;
       const content = data?.content || "";
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        setSuggestions(JSON.parse(jsonMatch[0]));
-      } else {
-        setSuggestions([content]);
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.analyses) {
+          setAnalysis(parsed);
+        } else {
+          setAnalysis({ analyses: [parsed] });
+        }
+      }
+
+      // Save to history
+      if (user) {
+        for (const subj of subjects) {
+          await supabase.from("subject_tests").insert({
+            user_id: user.id,
+            subject_line: subj,
+            spam_score: 0,
+            predicted_open_rate: "",
+            suggestions: null,
+          });
+        }
       }
     } catch (e: any) {
-      toast.error(e.message || "Failed to get suggestions");
+      toast.error(e.message || "Analysis failed");
     } finally {
-      setAiLoading(false);
+      setLoading(false);
     }
   };
 
+  const ringSize = 80;
+  const strokeWidth = 6;
+  const radius = (ringSize - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  const getSpamColor = (score: number) => {
+    if (score <= 25) return "hsl(var(--success))";
+    if (score <= 50) return "hsl(var(--chart-3))";
+    if (score <= 75) return "hsl(var(--warning))";
+    return "hsl(var(--destructive))";
+  };
+
   return (
-    <div className="p-6 space-y-6 max-w-4xl">
+    <div className="p-6 space-y-6 max-w-5xl">
       <div>
         <h1 className="text-2xl font-bold">Subject Line Tester</h1>
-        <p className="text-muted-foreground text-sm mt-1">Score your subject line for deliverability and engagement</p>
+        <p className="text-muted-foreground text-sm mt-1">AI-powered spam scoring, open rate prediction & improvement suggestions</p>
       </div>
 
+      {/* Input */}
       <Card className="bg-card border-border">
-        <CardContent className="pt-6">
-          <Input
-            placeholder="Type your subject line here..."
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            className="text-lg h-12"
+        <CardContent className="pt-6 space-y-4">
+          <Textarea
+            placeholder={"Enter up to 5 subject lines (one per line) to compare:\n\nQuick question about {{company}}\n3 ways to boost your reply rate\nAre you still using spreadsheets for outreach?"}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            rows={4}
+            className="text-sm"
           />
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">{input.split("\n").filter(s => s.trim()).length}/5 subjects</span>
+            <Button onClick={analyze} disabled={loading || !input.trim()} className="gap-2">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
+              Analyze
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      {checks.length > 0 && (
-        <div className="grid md:grid-cols-[1fr_200px] gap-6">
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle className="text-base">Analysis</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {checks.map((c, i) => (
-                <div key={i} className="flex items-start gap-3 py-2 border-b border-border last:border-0">
-                  {c.passed ? (
-                    <Check className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
-                  ) : c.warn ? (
-                    <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
-                  ) : (
-                    <X className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                  )}
-                  <div>
-                    <p className="text-sm font-medium">{c.name}</p>
-                    <p className="text-xs text-muted-foreground">{c.detail}</p>
+      {/* Loading */}
+      {loading && (
+        <div className="space-y-4">
+          {[0, 1].map(i => (
+            <Card key={i} className="bg-card border-border">
+              <CardContent className="pt-6 space-y-3">
+                <Skeleton className="h-6 w-48" />
+                <div className="flex gap-6">
+                  <Skeleton className="h-20 w-20 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
                   </div>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <div className="flex flex-col items-center gap-4">
-            <Card className="bg-card border-border p-6 flex flex-col items-center">
-              <div className="relative">
-                <svg width={ringSize} height={ringSize} className="transform -rotate-90">
-                  <circle cx={ringSize / 2} cy={ringSize / 2} r={radius} fill="none" stroke="hsl(var(--muted))" strokeWidth={strokeWidth} />
-                  <circle cx={ringSize / 2} cy={ringSize / 2} r={radius} fill="none" stroke={gradeColor} strokeWidth={strokeWidth} strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-500" />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-3xl font-bold" style={{ color: gradeColor }}>{score}</span>
-                  <span className="text-xs text-muted-foreground">Grade {grade}</span>
-                </div>
-              </div>
+              </CardContent>
             </Card>
-
-            <Button variant="outline" onClick={getAiSuggestions} disabled={aiLoading || !subject.trim()} className="w-full">
-              {aiLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
-              AI Suggestions
-            </Button>
-          </div>
+          ))}
         </div>
       )}
 
-      {suggestions.length > 0 && (
+      {/* Results */}
+      {analysis && !loading && (
+        <>
+          {/* Ranking (multi-subject) */}
+          {analysis.ranking && analysis.ranking.length > 1 && (
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Trophy className="h-4 w-4 text-primary" />
+                  Ranking
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {analysis.ranking.map((r, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-md bg-secondary/30 border border-border">
+                    <span className={`text-lg font-bold ${i === 0 ? "text-primary" : "text-muted-foreground"}`}>#{r.rank || i + 1}</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{r.subject}</p>
+                      <p className="text-xs text-muted-foreground">{r.reasoning}</p>
+                    </div>
+                  </div>
+                ))}
+                {analysis.ab_recommendation && (
+                  <div className="mt-3 p-3 rounded-md bg-primary/10 border border-primary/20">
+                    <p className="text-sm font-medium text-primary">A/B Test Recommendation</p>
+                    <p className="text-xs text-muted-foreground mt-1">{analysis.ab_recommendation.reasoning}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Per-subject analysis */}
+          {analysis.analyses.map((a, idx) => {
+            const spamOffset = circumference - ((100 - a.spam_score) / 100) * circumference;
+            return (
+              <Card key={idx} className="bg-card border-border">
+                <CardHeader>
+                  <CardTitle className="text-base">{a.subject}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid md:grid-cols-[auto_1fr] gap-6">
+                    {/* Spam Score Ring */}
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="relative">
+                        <svg width={ringSize} height={ringSize} className="transform -rotate-90">
+                          <circle cx={ringSize/2} cy={ringSize/2} r={radius} fill="none" stroke="hsl(var(--muted))" strokeWidth={strokeWidth} />
+                          <circle cx={ringSize/2} cy={ringSize/2} r={radius} fill="none" stroke={getSpamColor(a.spam_score)} strokeWidth={strokeWidth} strokeDasharray={circumference} strokeDashoffset={spamOffset} strokeLinecap="round" className="transition-all duration-500" />
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                          <span className="text-xl font-bold" style={{ color: getSpamColor(a.spam_score) }}>{100 - a.spam_score}</span>
+                          <span className="text-[9px] text-muted-foreground">Safety</span>
+                        </div>
+                      </div>
+                      <div className="text-center">
+                        <div className="flex items-center gap-1 text-sm font-medium">
+                          <TrendingUp className="h-3.5 w-3.5 text-primary" />
+                          {a.predicted_open_rate}
+                        </div>
+                        <span className="text-[10px] text-muted-foreground">Predicted Open Rate</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      {/* Open Rate Reasoning */}
+                      <p className="text-sm text-muted-foreground">{a.open_rate_reasoning}</p>
+
+                      {/* Spam Words */}
+                      {a.spam_words && a.spam_words.length > 0 && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1.5">Spam Triggers:</p>
+                          <div className="flex gap-1.5 flex-wrap">
+                            {a.spam_words.map((w, wi) => (
+                              <Badge key={wi} variant="outline" className="text-xs bg-warning/10 text-warning border-warning/30 gap-1">
+                                <AlertTriangle className="h-3 w-3" />
+                                {typeof w === 'string' ? w : w.word}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Preview Text Suggestion */}
+                      <div className="p-3 rounded-md bg-secondary/30 border border-border">
+                        <p className="text-xs text-muted-foreground mb-1">Suggested Preview Text:</p>
+                        <p className="text-sm">{a.preview_text_suggestion}</p>
+                      </div>
+
+                      {/* Mobile Preview */}
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <Smartphone className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-xs text-muted-foreground">Mobile Preview (40 chars)</span>
+                        </div>
+                        <div className="bg-secondary/50 border border-border rounded-md p-3">
+                          <p className="text-sm font-medium truncate" style={{ maxWidth: "300px" }}>
+                            {a.subject.length > 40 ? a.subject.substring(0, 40) + "..." : a.subject}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate" style={{ maxWidth: "300px" }}>
+                            {a.preview_text_suggestion?.substring(0, 60)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* AI Improved Versions */}
+                  {a.improved_versions && a.improved_versions.length > 0 && (
+                    <div>
+                      <p className="text-sm font-medium flex items-center gap-2 mb-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        AI Improvements
+                      </p>
+                      <div className="space-y-2">
+                        {a.improved_versions.map((iv, ivi) => (
+                          <div key={ivi} className="flex items-center justify-between p-3 rounded-md bg-secondary/30 border border-border">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium">{iv.subject}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{iv.explanation}</p>
+                            </div>
+                            <div className="flex gap-1 ml-3">
+                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { navigator.clipboard.writeText(iv.subject); toast.success("Copied!"); }}>
+                                <Copy className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setInput(iv.subject); toast.success("Applied!"); }}>
+                                Use
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </>
+      )}
+
+      {/* History */}
+      {history.length > 0 && !loading && !analysis && (
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary" />
-              AI Rewrite Suggestions
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              Test History
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {suggestions.map((s, i) => (
-              <div key={i} className="flex items-center justify-between p-3 rounded-md bg-secondary/50 border border-border">
-                <span className="text-sm">{s}</span>
-                <Button variant="ghost" size="sm" onClick={() => { setSubject(s); toast.success("Applied!"); }}>
-                  Use This
-                </Button>
+            {history.map((h: any) => (
+              <div key={h.id} className="flex items-center justify-between p-3 rounded-md bg-secondary/30 border border-border cursor-pointer hover:bg-secondary/50 transition-colors"
+                onClick={() => { setInput(h.subject_line); toast.success("Loaded!"); }}>
+                <p className="text-sm">{h.subject_line}</p>
+                <span className="text-xs text-muted-foreground">{new Date(h.created_at).toLocaleDateString()}</span>
               </div>
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Empty State */}
+      {!analysis && !loading && history.length === 0 && (
+        <Card className="bg-card border-border">
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <Target className="h-12 w-12 text-muted-foreground mb-4" />
+            <p className="font-medium text-lg mb-1">Test your first subject line</p>
+            <p className="text-muted-foreground text-sm text-center max-w-md">
+              Enter up to 5 subject lines and get AI-powered spam scoring, open rate predictions, 
+              mobile preview, and improvement suggestions.
+            </p>
           </CardContent>
         </Card>
       )}
