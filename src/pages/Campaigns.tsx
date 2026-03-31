@@ -50,7 +50,7 @@ export default function Campaigns() {
     try {
       const [cRes, aRes] = await Promise.all([
         supabase.from("campaigns").select("*").order("created_at", { ascending: false }),
-        supabase.from("email_accounts").select("id, name, email"),
+        supabase.from("email_accounts").select("*"),
       ]);
       setCampaigns(cRes.data || []);
       setAccounts(aRes.data || []);
