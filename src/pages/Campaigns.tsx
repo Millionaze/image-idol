@@ -18,6 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, Send, Megaphone, Eye, Loader2, Trash2, ArrowDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { WarmupGateModal } from "@/components/warmup/WarmupGateModal";
+import { computeScores } from "@/components/warmup/WarmupReadinessModal";
 
 interface SequenceStep {
   subject: string;
