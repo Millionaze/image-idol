@@ -85,7 +85,7 @@ export default function CopyWriter() {
 
       // Save to history
       if (user) {
-        await supabase.from("copy_history").insert({
+        await supabase.from("copy_history").insert([{
           user_id: user.id,
           product_context: product,
           audience,
@@ -95,7 +95,7 @@ export default function CopyWriter() {
           variation_a: variations[0] || null,
           variation_b: variations[1] || null,
           variation_c: variations[2] || null,
-        });
+        }]);
       }
     } catch (e: any) {
       toast.error(e.message || "Generation failed");

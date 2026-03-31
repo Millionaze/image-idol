@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ClipboardCheck, Loader2, Check, X, ChevronDown, Shield, Globe, Server, FileText, TrendingUp, AlertTriangle, Clock, ExternalLink } from "lucide-react";
+import { ClipboardCheck, Loader2, Check, X, ChevronDown, Shield, Globe, Server, FileText, TrendingUp, AlertTriangle, Clock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
