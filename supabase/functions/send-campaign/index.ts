@@ -48,6 +48,39 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Sending account not found" }), { status: 404, headers: corsHeaders });
     }
 
+    // ── Warmup Readiness Gate ─────────────────────────────────────────
+    const { data: latestScore } = await supabaseAdmin
+      .from("warmup_scores")
+      .select("score")
+      .eq("account_id", account.id)
+      .order("calculated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestScore) {
+      if (latestScore.score < 50) {
+        return new Response(JSON.stringify({
+          error: "Account warmup score too low",
+          score: latestScore.score,
+          hard_block: true,
+          message: `This account has a warmup readiness score of ${latestScore.score}/100. Sending campaigns is blocked until score reaches at least 50.`,
+        }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      if (latestScore.score < 70) {
+        // Check if user explicitly opted to override
+        const reqBody = await req.clone().json().catch(() => ({}));
+        if (!reqBody.force_send) {
+          return new Response(JSON.stringify({
+            error: "Account warmup score below recommended threshold",
+            score: latestScore.score,
+            allow_override: true,
+            message: `This account is only ${latestScore.score}% warmed up. Sending campaigns now may hurt your sender reputation. Re-send with force_send: true to proceed.`,
+          }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+    }
+
     const { data: pendingContacts } = await supabase
       .from("contacts")
       .select("*")
