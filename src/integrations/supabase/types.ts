@@ -212,6 +212,39 @@ export type Database = {
           },
         ]
       }
+      dns_health_log: {
+        Row: {
+          changed_from: Json | null
+          changed_to: Json | null
+          checked_at: string
+          dkim_status: boolean
+          dmarc_status: boolean
+          domain: string
+          id: string
+          spf_status: boolean
+        }
+        Insert: {
+          changed_from?: Json | null
+          changed_to?: Json | null
+          checked_at?: string
+          dkim_status?: boolean
+          dmarc_status?: boolean
+          domain: string
+          id?: string
+          spf_status?: boolean
+        }
+        Update: {
+          changed_from?: Json | null
+          changed_to?: Json | null
+          checked_at?: string
+          dkim_status?: boolean
+          dmarc_status?: boolean
+          domain?: string
+          id?: string
+          spf_status?: boolean
+        }
+        Relationships: []
+      }
       email_accounts: {
         Row: {
           created_at: string
@@ -219,6 +252,7 @@ export type Database = {
           id: string
           imap_host: string | null
           imap_port: number | null
+          last_reply_length: string
           last_synced_uid: number
           mark_important_rate: number
           name: string
@@ -236,6 +270,7 @@ export type Database = {
           warmup_ramp_day: number
           warmup_sent_today: number
           warmup_start_date: string | null
+          warmup_status: string
           warmup_total_received: number
           warmup_total_sent: number
           warmup_weekdays_only: boolean
@@ -246,6 +281,7 @@ export type Database = {
           id?: string
           imap_host?: string | null
           imap_port?: number | null
+          last_reply_length?: string
           last_synced_uid?: number
           mark_important_rate?: number
           name: string
@@ -263,6 +299,7 @@ export type Database = {
           warmup_ramp_day?: number
           warmup_sent_today?: number
           warmup_start_date?: string | null
+          warmup_status?: string
           warmup_total_received?: number
           warmup_total_sent?: number
           warmup_weekdays_only?: boolean
@@ -273,6 +310,7 @@ export type Database = {
           id?: string
           imap_host?: string | null
           imap_port?: number | null
+          last_reply_length?: string
           last_synced_uid?: number
           mark_important_rate?: number
           name?: string
@@ -290,6 +328,7 @@ export type Database = {
           warmup_ramp_day?: number
           warmup_sent_today?: number
           warmup_start_date?: string | null
+          warmup_status?: string
           warmup_total_received?: number
           warmup_total_sent?: number
           warmup_weekdays_only?: boolean
@@ -549,6 +588,38 @@ export type Database = {
         }
         Relationships: []
       }
+      warmup_content_log: {
+        Row: {
+          account_id: string
+          body_hash: string
+          id: string
+          sent_at: string
+          subject_hash: string
+        }
+        Insert: {
+          account_id: string
+          body_hash: string
+          id?: string
+          sent_at?: string
+          subject_hash: string
+        }
+        Update: {
+          account_id?: string
+          body_hash?: string
+          id?: string
+          sent_at?: string
+          subject_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "warmup_content_log_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       warmup_logs: {
         Row: {
           account_id: string
@@ -581,6 +652,213 @@ export type Database = {
           {
             foreignKeyName: "warmup_logs_account_id_fkey"
             columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      warmup_partnerships: {
+        Row: {
+          account_id: string
+          assigned_at: string
+          daily_interaction_count: number
+          expires_at: string
+          id: string
+          last_interaction_date: string | null
+          partner_account_id: string
+          provider_type: string
+        }
+        Insert: {
+          account_id: string
+          assigned_at?: string
+          daily_interaction_count?: number
+          expires_at: string
+          id?: string
+          last_interaction_date?: string | null
+          partner_account_id: string
+          provider_type?: string
+        }
+        Update: {
+          account_id?: string
+          assigned_at?: string
+          daily_interaction_count?: number
+          expires_at?: string
+          id?: string
+          last_interaction_date?: string | null
+          partner_account_id?: string
+          provider_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "warmup_partnerships_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "warmup_partnerships_partner_account_id_fkey"
+            columns: ["partner_account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      warmup_rescues: {
+        Row: {
+          created_at: string
+          id: string
+          landed_in_spam_at: string | null
+          message_id: string | null
+          receiving_account_id: string
+          rescue_success: boolean
+          rescued_at: string | null
+          sending_account_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          landed_in_spam_at?: string | null
+          message_id?: string | null
+          receiving_account_id: string
+          rescue_success?: boolean
+          rescued_at?: string | null
+          sending_account_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          landed_in_spam_at?: string | null
+          message_id?: string | null
+          receiving_account_id?: string
+          rescue_success?: boolean
+          rescued_at?: string | null
+          sending_account_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "warmup_rescues_receiving_account_id_fkey"
+            columns: ["receiving_account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "warmup_rescues_sending_account_id_fkey"
+            columns: ["sending_account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      warmup_scores: {
+        Row: {
+          account_id: string
+          age_score: number
+          calculated_at: string
+          dns_score: number
+          gmail_score: number
+          id: string
+          outlook_score: number
+          reply_score: number
+          rescue_score: number
+          score: number
+        }
+        Insert: {
+          account_id: string
+          age_score?: number
+          calculated_at?: string
+          dns_score?: number
+          gmail_score?: number
+          id?: string
+          outlook_score?: number
+          reply_score?: number
+          rescue_score?: number
+          score?: number
+        }
+        Update: {
+          account_id?: string
+          age_score?: number
+          calculated_at?: string
+          dns_score?: number
+          gmail_score?: number
+          id?: string
+          outlook_score?: number
+          reply_score?: number
+          rescue_score?: number
+          score?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "warmup_scores_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      warmup_threads: {
+        Row: {
+          account_a: string
+          account_b: string
+          created_at: string
+          id: string
+          last_message_at: string | null
+          message_count: number
+          next_reply_at: string | null
+          next_reply_by: string | null
+          previous_message_summary: string | null
+          status: string
+          thread_id: string
+        }
+        Insert: {
+          account_a: string
+          account_b: string
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          message_count?: number
+          next_reply_at?: string | null
+          next_reply_by?: string | null
+          previous_message_summary?: string | null
+          status?: string
+          thread_id: string
+        }
+        Update: {
+          account_a?: string
+          account_b?: string
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          message_count?: number
+          next_reply_at?: string | null
+          next_reply_by?: string | null
+          previous_message_summary?: string | null
+          status?: string
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "warmup_threads_account_a_fkey"
+            columns: ["account_a"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "warmup_threads_account_b_fkey"
+            columns: ["account_b"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "warmup_threads_next_reply_by_fkey"
+            columns: ["next_reply_by"]
             isOneToOne: false
             referencedRelation: "email_accounts"
             referencedColumns: ["id"]
