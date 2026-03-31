@@ -466,6 +466,14 @@ export default function Campaigns() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <WarmupGateModal
+        open={gateModal.open}
+        onOpenChange={(v) => setGateModal((g) => ({ ...g, open: v }))}
+        score={gateModal.score}
+        accountEmail={gateModal.email}
+        onProceed={() => doSendCampaign(gateModal.campaignId)}
+      />
     </div>
   );
 }
