@@ -147,14 +147,14 @@ export default function AuditReport() {
   const downloadReport = () => {
     const now = new Date().toLocaleDateString();
     const ready = audits.filter((a) => a.grade === "A" || a.grade === "B").length;
-    const html = `<!DOCTYPE html><html><head><title>MailForge Audit Report</title><style>
+    const html = `<!DOCTYPE html><html><head><title>Pixel Growth Audit Report</title><style><style>
       body{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#1a1a2e;background:#fff}
       h1{color:#e65100}h2{margin-top:30px;border-bottom:2px solid #e65100;padding-bottom:8px}
       .check{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #eee}
       .pass{color:#2e7d32}.fail{color:#c62828}.grade{font-size:36px;font-weight:bold;padding:8px 16px;border-radius:8px;display:inline-block}
       .summary{background:#f5f5f5;padding:16px;border-radius:8px;margin:20px 0}
     </style></head><body>
-    <h1>🔥 MailForge Deliverability Audit</h1>
+    <h1>🔥 Pixel Growth Deliverability Audit</h1>
     <p>Generated: ${now}</p>
     <div class="summary"><strong>${ready} of ${audits.length}</strong> accounts are campaign-ready. <strong>${audits.length - ready}</strong> accounts need attention.</div>
     ${audits.map((a) => `

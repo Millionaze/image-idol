@@ -93,7 +93,7 @@ export function AppSidebar() {
         <Flame className="h-6 w-6 shrink-0 text-primary" />
         {!collapsed && (
           <span className="text-lg font-bold tracking-tight">
-            Mail<span className="text-primary">Forge</span>
+            Pixel<span className="text-primary"> Growth</span>
           </span>
         )}
       </div>
