@@ -36,7 +36,7 @@ export default function Login() {
             <Flame className="h-7 w-7 text-primary" />
           </div>
           <CardTitle className="text-2xl">
-            Mail<span className="text-primary">Forge</span>
+            Pixel<span className="text-primary"> Growth</span>
           </CardTitle>
           <CardDescription>Sign in to your account</CardDescription>
         </CardHeader>

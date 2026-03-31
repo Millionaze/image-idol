@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
           if (tlsResp.startsWith("220")) {
             conn = await Deno.startTls(conn as Deno.TcpConn, { hostname: smtp_host });
             // Re-EHLO after TLS upgrade
-            ehlo = await sendCmd(conn, "EHLO mailforge");
+            ehlo = await sendCmd(conn, "EHLO pixelgrowth");
             console.log("Post-TLS EHLO:", ehlo.trim());
           }
         }
