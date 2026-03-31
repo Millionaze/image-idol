@@ -1,217 +1,286 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { CalendarDays } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { CalendarDays, Loader2, Sparkles, Clock, TrendingUp, AlertTriangle, Zap } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { format, addDays, startOfWeek, isSameDay } from "date-fns";
+import { toast } from "sonner";
 
-interface Account {
-  id: string;
-  name: string;
-  email: string;
-  warmup_daily_limit: number;
-}
-
+const INDUSTRIES = ["SaaS", "Finance", "Healthcare", "E-commerce", "Real Estate", "Marketing Agency", "Legal", "Education", "Manufacturing", "Consulting", "Other"];
+const TIMEZONES = ["US/Eastern", "US/Central", "US/Mountain", "US/Pacific", "Europe/London", "Europe/Berlin", "Europe/Paris", "Asia/Tokyo", "Asia/Shanghai", "Asia/Kolkata", "Australia/Sydney"];
+const EMAIL_TYPES = ["Cold outreach", "Follow-up", "Newsletter", "Re-engagement", "Event invitation"];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+interface SendAnalysis {
+  best_day: { day: string; reasoning: string };
+  best_time_window: { start: string; end: string; reasoning: string };
+  avoid_times: Array<{ time: string; reasoning: string }>;
+  recommended_cadence: Array<{ step: number; delay_days: number; reasoning: string }>;
+  heatmap: number[][];
+  personal_insights?: string;
+}
 
 export default function SendPlanner() {
   const { user } = useAuth();
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
-  const [limits, setLimits] = useState<Record<string, number>>({});
-  const [totalContacts, setTotalContacts] = useState(500);
-  const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [sendingDays, setSendingDays] = useState([1, 2, 3, 4, 5]); // Mon-Fri
+  const [timezone, setTimezone] = useState("US/Eastern");
+  const [industry, setIndustry] = useState("SaaS");
+  const [emailType, setEmailType] = useState("Cold outreach");
+  const [analysis, setAnalysis] = useState<SendAnalysis | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
 
   useEffect(() => {
     if (!user) return;
-    supabase.from("email_accounts").select("id, name, email, warmup_daily_limit").eq("user_id", user.id).then(({ data }) => {
-      if (data) {
-        setAccounts(data);
-        setSelectedAccounts(data.map((a) => a.id));
-        const lim: Record<string, number> = {};
-        data.forEach((a) => (lim[a.id] = a.warmup_daily_limit));
-        setLimits(lim);
-      }
-    });
+    supabase.from("send_plans").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5)
+      .then(({ data }) => { if (data) setHistory(data); });
   }, [user]);
 
-  const toggleDay = (day: number) => {
-    setSendingDays((prev) => prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort());
-  };
-
-  const toggleAccount = (id: string) => {
-    setSelectedAccounts((prev) => prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]);
-  };
-
-  const schedule = useMemo(() => {
-    const active = selectedAccounts.filter((id) => limits[id] > 0);
-    if (active.length === 0 || totalContacts <= 0) return { days: [], totalDailyCapacity: 0, finishDate: null, daysNeeded: 0 };
-
-    const totalDailyCapacity = active.reduce((sum, id) => sum + (limits[id] || 0), 0);
-    const start = new Date(startDate);
-    const days: { date: Date; total: number; breakdown: { name: string; count: number }[] }[] = [];
-    let remaining = totalContacts;
-
-    for (let d = 0; remaining > 0 && d < 365; d++) {
-      const date = addDays(start, d);
-      const dayOfWeek = date.getDay();
-      if (!sendingDays.includes(dayOfWeek)) continue;
-
-      const todayTotal = Math.min(remaining, totalDailyCapacity);
-      let todayRemaining = todayTotal;
-      const breakdown: { name: string; count: number }[] = [];
-
-      for (const id of active) {
-        const acc = accounts.find((a) => a.id === id);
-        const count = Math.min(todayRemaining, limits[id] || 0);
-        if (count > 0) {
-          breakdown.push({ name: acc?.name || acc?.email || id, count });
-          todayRemaining -= count;
+  const analyze = async () => {
+    setLoading(true);
+    setAnalysis(null);
+    try {
+      // Fetch historical campaign data if available
+      let historicalData = null;
+      if (user) {
+        const { data: campaigns } = await supabase.from("campaigns").select("sent_count, open_count, created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(10);
+        if (campaigns && campaigns.length > 0) {
+          historicalData = campaigns.map(c => ({
+            open_rate: c.sent_count > 0 ? Math.round((c.open_count / c.sent_count) * 100) : 0,
+            sent_at: c.created_at,
+          }));
         }
       }
 
-      days.push({ date, total: todayTotal, breakdown });
-      remaining -= todayTotal;
-    }
-
-    return {
-      days,
-      totalDailyCapacity,
-      finishDate: days.length > 0 ? days[days.length - 1].date : null,
-      daysNeeded: days.length,
-    };
-  }, [selectedAccounts, limits, totalContacts, startDate, sendingDays, accounts]);
-
-  // Generate 4 weeks of calendar starting from the week of startDate
-  const calendarWeeks = useMemo(() => {
-    const start = startOfWeek(new Date(startDate));
-    const weeks: Date[][] = [];
-    for (let w = 0; w < 4; w++) {
-      const week: Date[] = [];
-      for (let d = 0; d < 7; d++) {
-        week.push(addDays(start, w * 7 + d));
+      const { data, error } = await supabase.functions.invoke("generate-email-copy", {
+        body: { type: "analyze-send-time", timezone, industry, email_type: emailType, historical_data: historicalData },
+      });
+      if (error) throw error;
+      const content = data?.content || "";
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        setAnalysis(JSON.parse(jsonMatch[0]));
       }
-      weeks.push(week);
-    }
-    return weeks;
-  }, [startDate]);
 
-  const getDaySchedule = (date: Date) => schedule.days.find((d) => isSameDay(d.date, date));
+      // Save to history
+      if (user) {
+        await supabase.from("send_plans").insert({
+          user_id: user.id,
+          timezone,
+          industry,
+          analysis: jsonMatch ? JSON.parse(jsonMatch[0]) : null,
+          heatmap_data: null,
+        });
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Analysis failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getCellColor = (score: number) => {
+    if (score >= 8) return "bg-emerald-500/60";
+    if (score >= 6) return "bg-emerald-500/30";
+    if (score >= 4) return "bg-warning/30";
+    if (score >= 2) return "bg-warning/15";
+    return "bg-destructive/15";
+  };
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl">
+    <div className="p-6 space-y-6 max-w-6xl">
       <div>
         <h1 className="text-2xl font-bold">Send Planner</h1>
-        <p className="text-muted-foreground text-sm mt-1">Plan your sending schedule across accounts</p>
+        <p className="text-muted-foreground text-sm mt-1">AI-powered optimal send time analysis with industry-specific insights</p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <CalendarDays className="h-4 w-4 text-primary" />
-              Configuration
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      {/* Input Form */}
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-primary" />
+            Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label>Total Contacts</Label>
-              <Input type="number" value={totalContacts} onChange={(e) => setTotalContacts(parseInt(e.target.value) || 0)} />
+              <Label>Target Timezone</Label>
+              <Select value={timezone} onValueChange={setTimezone}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TIMEZONES.map(tz => <SelectItem key={tz} value={tz}>{tz}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
-              <Label>Start Date</Label>
-              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              <Label>Prospect Industry</Label>
+              <Select value={industry} onValueChange={setIndustry}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {INDUSTRIES.map(i => <SelectItem key={i} value={i}>{i}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
-              <Label>Sending Days</Label>
-              <div className="flex gap-2">
-                {DAYS.map((name, i) => (
-                  <Button key={i} variant={sendingDays.includes(i) ? "default" : "outline"} size="sm" className="w-10 h-8 text-xs" onClick={() => toggleDay(i)}>
-                    {name}
-                  </Button>
-                ))}
-              </div>
+              <Label>Email Type</Label>
+              <Select value={emailType} onValueChange={setEmailType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {EMAIL_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="space-y-3">
-              <Label>Accounts & Daily Limits</Label>
-              {accounts.map((acc) => (
-                <div key={acc.id} className="flex items-center gap-3">
-                  <Checkbox checked={selectedAccounts.includes(acc.id)} onCheckedChange={() => toggleAccount(acc.id)} />
-                  <span className="text-sm flex-1 truncate">{acc.name || acc.email}</span>
-                  <Input type="number" className="w-20 h-8 text-sm" value={limits[acc.id] || 0} onChange={(e) => setLimits((prev) => ({ ...prev, [acc.id]: parseInt(e.target.value) || 0 }))} />
+          </div>
+          <Button onClick={analyze} disabled={loading} className="gap-2">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            Analyze Optimal Times
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Loading */}
+      {loading && (
+        <div className="grid md:grid-cols-3 gap-4">
+          {[0, 1, 2].map(i => (
+            <Card key={i} className="bg-card border-border">
+              <CardContent className="pt-6 space-y-3">
+                <Skeleton className="h-5 w-24" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {analysis && !loading && (
+        <>
+          {/* Insight Cards */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <Card className="bg-card border-border">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="h-4 w-4 text-emerald-400" />
+                  <span className="text-sm font-medium">Best Day</span>
                 </div>
-              ))}
-              {accounts.length === 0 && <p className="text-sm text-muted-foreground">No accounts connected</p>}
-            </div>
-          </CardContent>
-        </Card>
+                <p className="text-lg font-bold text-primary">{analysis.best_day?.day}</p>
+                <p className="text-xs text-muted-foreground mt-1">{analysis.best_day?.reasoning}</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-card border-border">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">Best Window</span>
+                </div>
+                <p className="text-lg font-bold text-primary">{analysis.best_time_window?.start} – {analysis.best_time_window?.end}</p>
+                <p className="text-xs text-muted-foreground mt-1">{analysis.best_time_window?.reasoning}</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-card border-border">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="h-4 w-4 text-warning" />
+                  <span className="text-sm font-medium">Avoid</span>
+                </div>
+                {analysis.avoid_times?.slice(0, 2).map((a, i) => (
+                  <p key={i} className="text-sm"><span className="text-destructive font-medium">{a.time}</span> <span className="text-xs text-muted-foreground">— {a.reasoning}</span></p>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
 
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-base">Calendar</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-7 gap-1 text-center mb-2">
-              {DAYS.map((d) => (
-                <div key={d} className="text-xs text-muted-foreground font-medium">{d}</div>
-              ))}
-            </div>
-            {calendarWeeks.map((week, wi) => (
-              <div key={wi} className="grid grid-cols-7 gap-1 mb-1">
-                {week.map((date, di) => {
-                  const dayData = getDaySchedule(date);
-                  const isFinishDay = schedule.finishDate && isSameDay(date, schedule.finishDate);
-                  return (
-                    <Tooltip key={di}>
-                      <TooltipTrigger asChild>
-                        <div className={`p-1.5 rounded text-center text-xs min-h-[48px] flex flex-col items-center justify-center border transition-colors ${
-                          isFinishDay ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400" :
-                          dayData ? "bg-primary/10 border-primary/20 text-primary" :
-                          "bg-secondary/30 border-border text-muted-foreground"
-                        }`}>
-                          <span className="text-[10px]">{format(date, "d")}</span>
-                          {dayData ? (
-                            <span className="font-bold text-xs">{dayData.total}</span>
-                          ) : (
-                            <span className="text-[10px]">—</span>
-                          )}
-                        </div>
-                      </TooltipTrigger>
-                      {dayData && (
-                        <TooltipContent>
-                          <div className="text-xs space-y-1">
-                            <p className="font-medium">{format(date, "MMM d, yyyy")}</p>
-                            {dayData.breakdown.map((b, bi) => (
-                              <p key={bi}>{b.name}: {b.count} emails</p>
-                            ))}
-                            {isFinishDay && <p className="text-emerald-400 font-medium">✓ Campaign complete</p>}
-                          </div>
-                        </TooltipContent>
+          {/* Heatmap */}
+          {analysis.heatmap && analysis.heatmap.length === 7 && (
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <CardTitle className="text-base">Weekly Heatmap</CardTitle>
+                <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+                  <span className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-emerald-500/60" /> Best</span>
+                  <span className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-warning/30" /> OK</span>
+                  <span className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-destructive/15" /> Avoid</span>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <div className="min-w-[700px]">
+                    {/* Hour headers */}
+                    <div className="grid" style={{ gridTemplateColumns: "60px repeat(24, 1fr)" }}>
+                      <div />
+                      {HOURS.map(h => (
+                        <div key={h} className="text-[9px] text-muted-foreground text-center">{h}h</div>
+                      ))}
+                    </div>
+                    {/* Day rows */}
+                    {DAYS.map((day, di) => (
+                      <div key={day} className="grid mt-0.5" style={{ gridTemplateColumns: "60px repeat(24, 1fr)" }}>
+                        <div className="text-xs text-muted-foreground font-medium self-center">{day}</div>
+                        {HOURS.map(h => {
+                          const score = analysis.heatmap[di]?.[h] || 0;
+                          return (
+                            <div key={h} className={`h-6 m-px rounded-sm ${getCellColor(score)} hover:ring-1 hover:ring-primary/50 cursor-pointer transition-all`} title={`${day} ${h}:00 — Score: ${score}/10`} />
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Cadence */}
+          {analysis.recommended_cadence && analysis.recommended_cadence.length > 0 && (
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-primary" />
+                  Recommended Cadence
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-2 overflow-x-auto pb-2">
+                  {analysis.recommended_cadence.map((step, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="flex flex-col items-center p-3 rounded-lg bg-secondary/30 border border-border min-w-[100px]">
+                        <span className="text-xs text-primary font-medium">Step {step.step}</span>
+                        <span className="text-lg font-bold">Day {step.delay_days}</span>
+                        <span className="text-[10px] text-muted-foreground text-center">{step.reasoning}</span>
+                      </div>
+                      {i < analysis.recommended_cadence.length - 1 && (
+                        <span className="text-muted-foreground">→</span>
                       )}
-                    </Tooltip>
-                  );
-                })}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-      {schedule.finishDate && (
+          {/* Personal Insights */}
+          {analysis.personal_insights && (
+            <Card className="bg-card border-border">
+              <CardContent className="pt-6">
+                <p className="text-sm"><span className="text-primary font-medium">Your Data: </span>{analysis.personal_insights}</p>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {/* Empty State */}
+      {!analysis && !loading && (
         <Card className="bg-card border-border">
-          <CardContent className="pt-6">
-            <p className="text-sm">
-              At current settings, you will finish reaching all <span className="font-bold text-primary">{totalContacts.toLocaleString()}</span> contacts by{" "}
-              <span className="font-bold text-emerald-400">{format(schedule.finishDate, "MMMM d, yyyy")}</span>. That is{" "}
-              <span className="font-bold">{schedule.daysNeeded} sending days</span> using{" "}
-              <span className="font-bold">{selectedAccounts.length} accounts</span> at{" "}
-              <span className="font-bold">{schedule.totalDailyCapacity} emails/day</span>.
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <CalendarDays className="h-12 w-12 text-muted-foreground mb-4" />
+            <p className="font-medium text-lg mb-1">Find your optimal send time</p>
+            <p className="text-muted-foreground text-sm text-center max-w-md">
+              AI analyzes your industry, timezone, and past campaign performance to recommend the best days 
+              and times to send emails for maximum open rates.
             </p>
           </CardContent>
         </Card>

@@ -16,16 +16,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Send, Megaphone, Eye, Loader2, Trash2, ArrowDown } from "lucide-react";
+import { Plus, Send, Megaphone, Eye, Loader2, Trash2, ArrowDown, Sparkles, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { WarmupGateModal } from "@/components/warmup/WarmupGateModal";
 import { computeScores } from "@/components/warmup/WarmupReadinessModal";
+
+type ConditionType = "always" | "no_open" | "open_no_reply" | "link_click";
 
 interface SequenceStep {
   subject: string;
   body: string;
   delay_days: number;
   delay_hours: number;
+  condition_type: ConditionType;
 }
 
 export default function Campaigns() {
@@ -43,6 +46,7 @@ export default function Campaigns() {
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [aiLoading, setAiLoading] = useState(false);
   const [gateModal, setGateModal] = useState<{ open: boolean; score: number; email: string; campaignId: string }>({ open: false, score: 0, email: "", campaignId: "" });
 
   const load = async () => {
@@ -78,8 +82,8 @@ export default function Campaigns() {
   }, [location.state]);
 
   const addStep = () => {
-    if (steps.length >= 5) return;
-    setSteps([...steps, { subject: "", body: "", delay_days: 1, delay_hours: 0 }]);
+    if (steps.length >= 6) return;
+    setSteps([...steps, { subject: "", body: "", delay_days: 1, delay_hours: 0, condition_type: "no_open" as ConditionType }]);
   };
 
   const removeStep = (idx: number) => {
@@ -296,28 +300,64 @@ export default function Campaigns() {
               {/* Sequence steps */}
               {form.is_sequence && (
                 <div className="space-y-3">
+                  {/* AI Generate Button */}
+                  <Button variant="outline" size="sm" className="w-full gap-2" disabled={aiLoading} onClick={async () => {
+                    setAiLoading(true);
+                    try {
+                      const { data, error } = await supabase.functions.invoke("generate-email-copy", {
+                        body: { type: "generate-sequence", goal: form.name || "Book a demo call", product: "", audience: "", tone: "Professional" },
+                      });
+                      if (error) throw error;
+                      const content = data?.content || "";
+                      const jsonMatch = content.match(/\[[\s\S]*\]/);
+                      if (jsonMatch) {
+                        const parsed = JSON.parse(jsonMatch[0]);
+                        if (parsed[0]) {
+                          setForm(f => ({ ...f, subject: parsed[0].subject || f.subject, body: parsed[0].body || f.body }));
+                        }
+                        setSteps(parsed.slice(1).map((s: any) => ({
+                          subject: s.subject || "", body: s.body || "",
+                          delay_days: s.delay_days || 2, delay_hours: 0,
+                          condition_type: s.condition_type || "no_open",
+                        })));
+                        toast({ title: "AI sequence generated!", description: `${parsed.length} steps created` });
+                      }
+                    } catch (e: any) {
+                      toast({ title: "AI generation failed", description: e.message, variant: "destructive" });
+                    } finally { setAiLoading(false); }
+                  }}>
+                    {aiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    AI Generate 5-Step Sequence
+                  </Button>
+
                   {steps.map((step, idx) => (
                     <div key={idx} className="space-y-2 border border-border rounded-lg p-3 relative">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <ArrowDown className="h-3 w-3 text-muted-foreground" />
-                          <Label className="text-sm font-medium">Step {idx + 2} — Follow-up</Label>
+                          <Label className="text-sm font-medium">Step {idx + 2}</Label>
                         </div>
                         <Button variant="ghost" size="icon" onClick={() => removeStep(idx)} className="h-6 w-6">
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                      <div className="flex gap-2">
-                        <div className="flex-1 space-y-1">
-                          <Label className="text-xs">Delay</Label>
-                          <div className="flex gap-1">
-                            <Input
-                              type="number" className="w-16" min={0}
-                              value={step.delay_days}
-                              onChange={(e) => updateStep(idx, "delay_days", parseInt(e.target.value) || 0)}
-                            />
-                            <span className="text-xs text-muted-foreground self-center">days</span>
-                          </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Delay (days)</Label>
+                          <Input type="number" className="h-8" min={0} value={step.delay_days}
+                            onChange={(e) => updateStep(idx, "delay_days", parseInt(e.target.value) || 0)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Condition</Label>
+                          <Select value={step.condition_type} onValueChange={(v) => updateStep(idx, "condition_type", v)}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="always">Send always</SelectItem>
+                              <SelectItem value="no_open">If NOT opened</SelectItem>
+                              <SelectItem value="open_no_reply">If opened, no reply</SelectItem>
+                              <SelectItem value="link_click">If clicked link</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                       <div className="space-y-1">
@@ -330,9 +370,9 @@ export default function Campaigns() {
                       </div>
                     </div>
                   ))}
-                  {steps.length < 4 && (
+                  {steps.length < 6 && (
                     <Button variant="outline" size="sm" onClick={addStep} className="w-full">
-                      + Add Follow-up Step
+                      + Add Follow-up Step (max 7 total)
                     </Button>
                   )}
                 </div>
@@ -388,7 +428,18 @@ export default function Campaigns() {
                   const rate = c.sent_count > 0 ? Math.round((c.open_count / c.sent_count) * 100) : 0;
                   return (
                     <TableRow key={c.id} className="cursor-pointer" onClick={() => openContactPanel(c)}>
-                      <TableCell className="font-medium">{c.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          {c.name}
+                          {c.paused_reason && (
+                            <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30 gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              Auto-paused
+                            </Badge>
+                          )}
+                        </div>
+                        {c.paused_reason && <p className="text-[10px] text-destructive mt-0.5">{c.paused_reason}</p>}
+                      </TableCell>
                       <TableCell>
                         {c.is_sequence ? (
                           <Badge variant="outline" className="text-xs">Sequence</Badge>

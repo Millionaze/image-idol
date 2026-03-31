@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_reports: {
+        Row: {
+          blacklist_score: number | null
+          content_score: number | null
+          created_at: string
+          details: Json | null
+          dns_score: number | null
+          domain: string
+          engagement_score: number | null
+          fixes: Json | null
+          grade: string | null
+          id: string
+          infrastructure_score: number | null
+          total_score: number | null
+          user_id: string
+        }
+        Insert: {
+          blacklist_score?: number | null
+          content_score?: number | null
+          created_at?: string
+          details?: Json | null
+          dns_score?: number | null
+          domain: string
+          engagement_score?: number | null
+          fixes?: Json | null
+          grade?: string | null
+          id?: string
+          infrastructure_score?: number | null
+          total_score?: number | null
+          user_id: string
+        }
+        Update: {
+          blacklist_score?: number | null
+          content_score?: number | null
+          created_at?: string
+          details?: Json | null
+          dns_score?: number | null
+          domain?: string
+          engagement_score?: number | null
+          fixes?: Json | null
+          grade?: string | null
+          id?: string
+          infrastructure_score?: number | null
+          total_score?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       blacklist_checks: {
         Row: {
           account_id: string
@@ -46,6 +94,47 @@ export type Database = {
           },
         ]
       }
+      campaign_sequences: {
+        Row: {
+          body: string
+          campaign_id: string
+          condition_type: Database["public"]["Enums"]["sequence_condition"]
+          created_at: string
+          delay_days: number
+          id: string
+          step_number: number
+          subject: string
+        }
+        Insert: {
+          body?: string
+          campaign_id: string
+          condition_type?: Database["public"]["Enums"]["sequence_condition"]
+          created_at?: string
+          delay_days?: number
+          id?: string
+          step_number?: number
+          subject?: string
+        }
+        Update: {
+          body?: string
+          campaign_id?: string
+          condition_type?: Database["public"]["Enums"]["sequence_condition"]
+          created_at?: string
+          delay_days?: number
+          id?: string
+          step_number?: number
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_sequences_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           account_id: string
@@ -57,10 +146,13 @@ export type Database = {
           is_sequence: boolean
           name: string
           open_count: number
+          paused_reason: string | null
           reply_count: number
           sent_count: number
+          spam_complaint_count: number
           status: Database["public"]["Enums"]["campaign_status"]
           subject: string
+          unsubscribe_count: number
           user_id: string
         }
         Insert: {
@@ -73,10 +165,13 @@ export type Database = {
           is_sequence?: boolean
           name: string
           open_count?: number
+          paused_reason?: string | null
           reply_count?: number
           sent_count?: number
+          spam_complaint_count?: number
           status?: Database["public"]["Enums"]["campaign_status"]
           subject?: string
+          unsubscribe_count?: number
           user_id: string
         }
         Update: {
@@ -89,10 +184,13 @@ export type Database = {
           is_sequence?: boolean
           name?: string
           open_count?: number
+          paused_reason?: string | null
           reply_count?: number
           sent_count?: number
+          spam_complaint_count?: number
           status?: Database["public"]["Enums"]["campaign_status"]
           subject?: string
+          unsubscribe_count?: number
           user_id?: string
         }
         Relationships: [
@@ -135,7 +233,10 @@ export type Database = {
           contact_id: string
           current_step: number
           id: string
+          last_action: string | null
+          last_action_at: string | null
           next_send_at: string | null
+          scheduled_send_at: string | null
           status: Database["public"]["Enums"]["sequence_state_status"]
         }
         Insert: {
@@ -143,7 +244,10 @@ export type Database = {
           contact_id: string
           current_step?: number
           id?: string
+          last_action?: string | null
+          last_action_at?: string | null
           next_send_at?: string | null
+          scheduled_send_at?: string | null
           status?: Database["public"]["Enums"]["sequence_state_status"]
         }
         Update: {
@@ -151,7 +255,10 @@ export type Database = {
           contact_id?: string
           current_step?: number
           id?: string
+          last_action?: string | null
+          last_action_at?: string | null
           next_send_at?: string | null
+          scheduled_send_at?: string | null
           status?: Database["public"]["Enums"]["sequence_state_status"]
         }
         Relationships: [
@@ -211,6 +318,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      copy_history: {
+        Row: {
+          audience: string | null
+          created_at: string
+          goal: string | null
+          id: string
+          pain_point: string | null
+          product_context: string | null
+          tone: string | null
+          user_id: string
+          variation_a: Json | null
+          variation_b: Json | null
+          variation_c: Json | null
+        }
+        Insert: {
+          audience?: string | null
+          created_at?: string
+          goal?: string | null
+          id?: string
+          pain_point?: string | null
+          product_context?: string | null
+          tone?: string | null
+          user_id: string
+          variation_a?: Json | null
+          variation_b?: Json | null
+          variation_c?: Json | null
+        }
+        Update: {
+          audience?: string | null
+          created_at?: string
+          goal?: string | null
+          id?: string
+          pain_point?: string | null
+          product_context?: string | null
+          tone?: string | null
+          user_id?: string
+          variation_a?: Json | null
+          variation_b?: Json | null
+          variation_c?: Json | null
+        }
+        Relationships: []
       }
       dns_health_log: {
         Row: {
@@ -382,6 +531,80 @@ export type Database = {
           },
         ]
       }
+      list_cleaning_jobs: {
+        Row: {
+          created_at: string
+          disposable_count: number
+          filename: string
+          id: string
+          invalid_count: number
+          risky_count: number
+          status: string
+          total_emails: number
+          user_id: string
+          valid_count: number
+        }
+        Insert: {
+          created_at?: string
+          disposable_count?: number
+          filename?: string
+          id?: string
+          invalid_count?: number
+          risky_count?: number
+          status?: string
+          total_emails?: number
+          user_id: string
+          valid_count?: number
+        }
+        Update: {
+          created_at?: string
+          disposable_count?: number
+          filename?: string
+          id?: string
+          invalid_count?: number
+          risky_count?: number
+          status?: string
+          total_emails?: number
+          user_id?: string
+          valid_count?: number
+        }
+        Relationships: []
+      }
+      list_cleaning_results: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          job_id: string
+          reason: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          job_id: string
+          reason?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          job_id?: string
+          reason?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "list_cleaning_results_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "list_cleaning_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       list_contacts: {
         Row: {
           company: string | null
@@ -511,6 +734,56 @@ export type Database = {
         }
         Relationships: []
       }
+      send_plans: {
+        Row: {
+          analysis: Json | null
+          campaign_id: string | null
+          created_at: string
+          heatmap_data: Json | null
+          id: string
+          industry: string | null
+          recommended_day: string | null
+          recommended_time: string | null
+          scheduled_at: string | null
+          timezone: string | null
+          user_id: string
+        }
+        Insert: {
+          analysis?: Json | null
+          campaign_id?: string | null
+          created_at?: string
+          heatmap_data?: Json | null
+          id?: string
+          industry?: string | null
+          recommended_day?: string | null
+          recommended_time?: string | null
+          scheduled_at?: string | null
+          timezone?: string | null
+          user_id: string
+        }
+        Update: {
+          analysis?: Json | null
+          campaign_id?: string | null
+          created_at?: string
+          heatmap_data?: Json | null
+          id?: string
+          industry?: string | null
+          recommended_day?: string | null
+          recommended_time?: string | null
+          scheduled_at?: string | null
+          timezone?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "send_plans_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sequence_steps: {
         Row: {
           body: string
@@ -584,6 +857,66 @@ export type Database = {
           tracking_domain?: string | null
           tracking_domain_verified?: boolean
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      spintax_templates: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          raw_content: string | null
+          spintax_content: string | null
+          user_id: string
+          variation_count: number | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name?: string
+          raw_content?: string | null
+          spintax_content?: string | null
+          user_id: string
+          variation_count?: number | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          raw_content?: string | null
+          spintax_content?: string | null
+          user_id?: string
+          variation_count?: number | null
+        }
+        Relationships: []
+      }
+      subject_tests: {
+        Row: {
+          created_at: string
+          id: string
+          predicted_open_rate: string | null
+          spam_score: number | null
+          subject_line: string
+          suggestions: Json | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          predicted_open_rate?: string | null
+          spam_score?: number | null
+          subject_line: string
+          suggestions?: Json | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          predicted_open_rate?: string | null
+          spam_score?: number | null
+          subject_line?: string
+          suggestions?: Json | null
           user_id?: string
         }
         Relationships: []
@@ -875,6 +1208,7 @@ export type Database = {
     Enums: {
       campaign_status: "draft" | "sending" | "active" | "paused"
       contact_status: "pending" | "sent" | "opened" | "bounced" | "replied"
+      sequence_condition: "no_open" | "open_no_reply" | "link_click" | "always"
       sequence_state_status: "active" | "completed" | "paused"
       warmup_log_type:
         | "sent"
@@ -1010,6 +1344,7 @@ export const Constants = {
     Enums: {
       campaign_status: ["draft", "sending", "active", "paused"],
       contact_status: ["pending", "sent", "opened", "bounced", "replied"],
+      sequence_condition: ["no_open", "open_no_reply", "link_click", "always"],
       sequence_state_status: ["active", "completed", "paused"],
       warmup_log_type: [
         "sent",
