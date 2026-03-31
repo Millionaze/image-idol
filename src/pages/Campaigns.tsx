@@ -18,6 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, Send, Megaphone, Eye, Loader2, Trash2, ArrowDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { WarmupGateModal } from "@/components/warmup/WarmupGateModal";
+import { computeScores } from "@/components/warmup/WarmupReadinessModal";
 
 interface SequenceStep {
   subject: string;
@@ -41,13 +43,14 @@ export default function Campaigns() {
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [gateModal, setGateModal] = useState<{ open: boolean; score: number; email: string; campaignId: string }>({ open: false, score: 0, email: "", campaignId: "" });
 
   const load = async () => {
     if (!user) return;
     try {
       const [cRes, aRes] = await Promise.all([
         supabase.from("campaigns").select("*").order("created_at", { ascending: false }),
-        supabase.from("email_accounts").select("id, name, email"),
+        supabase.from("email_accounts").select("*"),
       ]);
       setCampaigns(cRes.data || []);
       setAccounts(aRes.data || []);
@@ -158,7 +161,21 @@ export default function Campaigns() {
     }
   };
 
-  const sendCampaign = async (id: string) => {
+  const trySendCampaign = async (id: string) => {
+    const campaign = campaigns.find((c) => c.id === id);
+    if (!campaign) return;
+    const account = accounts.find((a: any) => a.id === campaign.account_id);
+    if (account) {
+      const scores = computeScores(account, []);
+      if (scores.overall < 70) {
+        setGateModal({ open: true, score: scores.overall, email: account.email, campaignId: id });
+        return;
+      }
+    }
+    await doSendCampaign(id);
+  };
+
+  const doSendCampaign = async (id: string) => {
     setSending(id);
     try {
       const campaign = campaigns.find((c) => c.id === id);
@@ -386,7 +403,7 @@ export default function Campaigns() {
                       <TableCell className="text-right">{c.bounce_count}</TableCell>
                       <TableCell>
                         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                          <Button size="sm" variant="outline" onClick={() => sendCampaign(c.id)} disabled={sending === c.id} className="gap-1">
+                          <Button size="sm" variant="outline" onClick={() => trySendCampaign(c.id)} disabled={sending === c.id} className="gap-1">
                             {sending === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                             Send
                           </Button>
@@ -449,6 +466,14 @@ export default function Campaigns() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <WarmupGateModal
+        open={gateModal.open}
+        onOpenChange={(v) => setGateModal((g) => ({ ...g, open: v }))}
+        score={gateModal.score}
+        accountEmail={gateModal.email}
+        onProceed={() => doSendCampaign(gateModal.campaignId)}
+      />
     </div>
   );
 }
