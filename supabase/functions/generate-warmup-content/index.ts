@@ -98,25 +98,33 @@ Return ONLY the email body text, nothing else.`;
 
     // Try up to 3 times to generate non-duplicate content
     for (let attempt = 0; attempt < 3; attempt++) {
+      const anthropicHeaders = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      };
+
       const [subjectResp, bodyResp] = await Promise.all([
-        fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+          headers: anthropicHeaders,
           body: JSON.stringify({
-            model: "google/gemini-2.5-flash-lite",
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 256,
+            system: subjectPrompt,
             messages: [
-              { role: "system", content: subjectPrompt },
               { role: "user", content: `Generate unique content. Attempt ${attempt + 1}. Timestamp: ${Date.now()}` },
             ],
           }),
         }),
-        fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+          headers: anthropicHeaders,
           body: JSON.stringify({
-            model: "google/gemini-2.5-flash-lite",
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1024,
+            system: bodyPrompt,
             messages: [
-              { role: "system", content: bodyPrompt },
               { role: "user", content: `Generate unique content. Attempt ${attempt + 1}. Timestamp: ${Date.now()}` },
             ],
           }),
