@@ -92,9 +92,9 @@ export default function CopyWriter() {
           goal,
           tone,
           pain_point: painPoint,
-          variation_a: variations[0] || null,
-          variation_b: variations[1] || null,
-          variation_c: variations[2] || null,
+          variation_a: variations[0] ? JSON.parse(JSON.stringify(variations[0])) : null,
+          variation_b: variations[1] ? JSON.parse(JSON.stringify(variations[1])) : null,
+          variation_c: variations[2] ? JSON.parse(JSON.stringify(variations[2])) : null,
         }]);
       }
     } catch (e: any) {
