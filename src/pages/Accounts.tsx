@@ -13,7 +13,8 @@ import { DnsHealthPanel } from "@/components/DnsHealthPanel";
 import { BlacklistStatus } from "@/components/BlacklistStatus";
 import { PlacementTestModal } from "@/components/PlacementTestModal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, Loader2, Mail, TestTube, ShieldAlert } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Plus, Trash2, Loader2, Mail, TestTube, ShieldAlert, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number; smtp_secure: boolean }> = {
@@ -49,8 +50,8 @@ export default function Accounts() {
       if (error) throw error;
       setAccounts(data || []);
 
-      // Load latest blacklist checks
       if (data && data.length > 0) {
+        // Load latest blacklist checks
         const { data: checks } = await supabase
           .from("blacklist_checks")
           .select("*")
@@ -62,6 +63,49 @@ export default function Accounts() {
             if (!latest[c.account_id]) latest[c.account_id] = c;
           }
           setBlacklistResults(latest);
+        }
+
+        // Load cached DNS health for each account's domain so the
+        // deliverability ring shows real values immediately on load.
+        const domains = Array.from(new Set(data.map((a: any) => getDomain(a.email)).filter(Boolean)));
+        if (domains.length > 0) {
+          const { data: dnsRows } = await supabase
+            .from("dns_health_log")
+            .select("*")
+            .in("domain", domains)
+            .order("checked_at", { ascending: false });
+          if (dnsRows) {
+            const latestDns: Record<string, any> = {};
+            for (const r of dnsRows as any[]) {
+              if (!latestDns[r.domain]) {
+                latestDns[r.domain] = {
+                  spf: r.spf_status,
+                  dkim: r.dkim_status,
+                  dmarc: r.dmarc_status,
+                  checked_at: r.checked_at,
+                };
+              }
+            }
+            setDnsResults(latestDns);
+
+            // Auto-refresh any domain with no recent (<24h) entry
+            const now = Date.now();
+            const stale = domains.filter((d) => {
+              const entry = latestDns[d];
+              if (!entry) return true;
+              return now - new Date(entry.checked_at).getTime() > 24 * 60 * 60 * 1000;
+            });
+            for (const d of stale) {
+              supabase.functions.invoke("check-dns", { body: { domain: d } }).then(({ data: dnsData }) => {
+                if (dnsData) {
+                  setDnsResults((prev) => ({
+                    ...prev,
+                    [d]: { spf: dnsData.spf, dkim: dnsData.dkim, dmarc: dnsData.dmarc, checked_at: new Date().toISOString() },
+                  }));
+                }
+              }).catch(() => {});
+            }
+          }
         }
       }
     } catch (e: any) {
@@ -237,9 +281,19 @@ export default function Accounts() {
                 <CardContent className="p-5 space-y-3">
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-3">
-                      <div className="relative">
-                        <DeliverabilityRing score={delivScore} size={56} />
-                      </div>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="relative cursor-help">
+                            <DeliverabilityRing score={delivScore} size={56} />
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                          <p className="text-xs">
+                            <strong>Deliverability score</strong> — combines DNS health (SPF/DKIM/DMARC),
+                            blacklist status, and sender reputation. Auto-refreshes daily.
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
                       <div>
                         <p className="font-semibold">{a.name}</p>
                         <p className="text-sm text-muted-foreground">{a.email}</p>
@@ -251,7 +305,20 @@ export default function Accounts() {
                   </div>
 
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Reputation</span>
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      <span>Reputation</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3 w-3 cursor-help opacity-60" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">
+                            <strong>Sender reputation</strong> — built up through warmup activity and
+                            engagement history. New accounts start low (around 25–50). Enable warmup to grow it.
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                     <ReputationBar score={a.reputation_score} />
                   </div>
                   <div className="flex items-center justify-between text-sm">

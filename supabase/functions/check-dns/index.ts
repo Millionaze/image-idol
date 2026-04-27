@@ -47,6 +47,8 @@ async function checkDkim(domain: string): Promise<{ found: boolean; selector: st
   return { found: false, selector: null, record: null };
 }
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -67,7 +69,7 @@ Deno.serve(async (req) => {
     const spf = checkSpf(spfRes.Answer);
     const dmarc = checkDmarc(dmarcRes.Answer);
 
-    return new Response(JSON.stringify({
+    const result = {
       spf: spf.found,
       spf_record: spf.record,
       dkim: dkimRes.found,
@@ -76,7 +78,25 @@ Deno.serve(async (req) => {
       dmarc: dmarc.found,
       dmarc_record: dmarc.record,
       score: (spf.found ? 1 : 0) + (dkimRes.found ? 1 : 0) + (dmarc.found ? 1 : 0),
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    };
+
+    // Persist to dns_health_log for caching across reloads
+    try {
+      const supabase = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      );
+      await supabase.from("dns_health_log").insert({
+        domain,
+        spf_status: spf.found,
+        dkim_status: dkimRes.found,
+        dmarc_status: dmarc.found,
+      });
+    } catch (logErr) {
+      console.error("Failed to log DNS check:", logErr);
+    }
+
+    return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
