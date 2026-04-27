@@ -281,9 +281,19 @@ export default function Accounts() {
                 <CardContent className="p-5 space-y-3">
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-3">
-                      <div className="relative">
-                        <DeliverabilityRing score={delivScore} size={56} />
-                      </div>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="relative cursor-help">
+                            <DeliverabilityRing score={delivScore} size={56} />
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                          <p className="text-xs">
+                            <strong>Deliverability score</strong> — combines DNS health (SPF/DKIM/DMARC),
+                            blacklist status, and sender reputation. Auto-refreshes daily.
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
                       <div>
                         <p className="font-semibold">{a.name}</p>
                         <p className="text-sm text-muted-foreground">{a.email}</p>
@@ -295,7 +305,20 @@ export default function Accounts() {
                   </div>
 
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Reputation</span>
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      <span>Reputation</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3 w-3 cursor-help opacity-60" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">
+                            <strong>Sender reputation</strong> — built up through warmup activity and
+                            engagement history. New accounts start low (around 25–50). Enable warmup to grow it.
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                     <ReputationBar score={a.reputation_score} />
                   </div>
                   <div className="flex items-center justify-between text-sm">
