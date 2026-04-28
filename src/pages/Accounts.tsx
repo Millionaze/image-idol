@@ -14,7 +14,7 @@ import { BlacklistStatus } from "@/components/BlacklistStatus";
 import { PlacementTestModal } from "@/components/PlacementTestModal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Trash2, Loader2, Mail, TestTube, ShieldAlert, Info } from "lucide-react";
+import { Plus, Trash2, Loader2, Mail, TestTube, ShieldAlert, Info, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number; smtp_secure: boolean }> = {
@@ -42,6 +42,82 @@ export default function Accounts() {
   const [expandedDns, setExpandedDns] = useState<string | null>(null);
   const [placementOpen, setPlacementOpen] = useState(false);
   const [blacklistResults, setBlacklistResults] = useState<Record<string, { is_clean: boolean; listed_on: string[] }>>({});
+
+  // Edit dialog state
+  const [editAccount, setEditAccount] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState(emptyForm);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const openEditDialog = (a: any) => {
+    setEditError(null);
+    setEditAccount(a);
+    setEditForm({
+      name: a.name || "",
+      email: a.email || "",
+      smtp_host: a.smtp_host || "",
+      smtp_port: a.smtp_port || 587,
+      smtp_secure: a.smtp_secure ?? true,
+      imap_host: a.imap_host || "",
+      imap_port: a.imap_port || 993,
+      username: a.username || "",
+      password: "", // never pre-fill — leave blank to keep current
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editAccount) return;
+    setEditError(null);
+
+    // Same guardrail as Add: warn if username doesn't match email
+    if (editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase()) {
+      const ok = window.confirm(
+        `The Username (${editForm.username}) does not match the Email Address (${editForm.email}).\n\n` +
+        `This means the IMAP/SMTP server will log into the "${editForm.username}" mailbox, not "${editForm.email}".\n\n` +
+        `Continue only if you're sure this is correct.`
+      );
+      if (!ok) return;
+    }
+
+    const update: any = {
+      name: editForm.name,
+      email: editForm.email,
+      smtp_host: editForm.smtp_host,
+      smtp_port: editForm.smtp_port,
+      smtp_secure: editForm.smtp_secure,
+      imap_host: editForm.imap_host,
+      imap_port: editForm.imap_port,
+      username: editForm.username,
+    };
+
+    // Only update password if user typed something
+    const passwordChanged = editForm.password.length > 0;
+    if (passwordChanged) update.password = editForm.password;
+
+    // If credentials/mailbox changed, reset sync cursor so we don't skip messages in the new mailbox
+    const usernameChanged = editForm.username !== editAccount.username;
+    if (usernameChanged || passwordChanged) {
+      update.last_synced_uid = 0;
+    }
+
+    setEditSaving(true);
+    try {
+      const { error } = await supabase.from("email_accounts").update(update).eq("id", editAccount.id);
+      if (error) throw error;
+      toast({
+        title: "Account updated",
+        description: usernameChanged || passwordChanged
+          ? "Sync cursor reset — click Sync to refresh from the new mailbox."
+          : undefined,
+      });
+      setEditAccount(null);
+      load();
+    } catch (e: any) {
+      setEditError(e.message || "Failed to update account");
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   const load = async () => {
     if (!user) return;
@@ -342,9 +418,14 @@ export default function Accounts() {
                         <p className="text-sm text-muted-foreground">{a.email}</p>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={() => deleteAccount(a.id)} className="text-muted-foreground hover:text-destructive">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(a)} className="text-muted-foreground hover:text-foreground" title="Edit account">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => deleteAccount(a.id)} className="text-muted-foreground hover:text-destructive" title="Delete account">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between text-sm">
@@ -418,6 +499,80 @@ export default function Accounts() {
       )}
 
       <PlacementTestModal open={placementOpen} onOpenChange={setPlacementOpen} />
+
+      {/* Edit Account Dialog */}
+      <Dialog open={!!editAccount} onOpenChange={(v) => { if (!v) { setEditAccount(null); setEditError(null); } }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Email Account</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Display Name</Label>
+                <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Email Address</Label>
+                <Input
+                  value={editForm.email}
+                  onChange={(e) => {
+                    const newEmail = e.target.value;
+                    setEditForm((f) => {
+                      const shouldMirror = !f.username || f.username === f.email;
+                      return { ...f, email: newEmail, username: shouldMirror ? newEmail : f.username };
+                    });
+                  }}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><Label>SMTP Host</Label><Input value={editForm.smtp_host} onChange={(e) => setEditForm((f) => ({ ...f, smtp_host: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>SMTP Port</Label><Input type="number" value={editForm.smtp_port} onChange={(e) => setEditForm((f) => ({ ...f, smtp_port: parseInt(e.target.value) }))} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><Label>IMAP Host</Label><Input value={editForm.imap_host} onChange={(e) => setEditForm((f) => ({ ...f, imap_host: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>IMAP Port</Label><Input type="number" value={editForm.imap_port} onChange={(e) => setEditForm((f) => ({ ...f, imap_port: parseInt(e.target.value) }))} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Username</Label>
+                <Input value={editForm.username} onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))} />
+                <p className="text-xs text-muted-foreground">
+                  Usually the same as your email. Only change this if your provider uses a different IMAP/SMTP login (rare).
+                </p>
+                {editForm.username && editForm.email && editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase() && (
+                  <p className="text-xs text-destructive">
+                    ⚠ Username does not match Email — you'll sync the "{editForm.username}" mailbox, not "{editForm.email}".
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Password</Label>
+                <Input
+                  type="password"
+                  value={editForm.password}
+                  onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
+                  placeholder="Leave blank to keep current password"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={editForm.smtp_secure} onCheckedChange={(v) => setEditForm((f) => ({ ...f, smtp_secure: v }))} />
+              <Label>Use TLS/SSL</Label>
+            </div>
+            {editError && (
+              <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">{editError}</div>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditAccount(null)} disabled={editSaving} className="flex-1">Cancel</Button>
+              <Button onClick={saveEdit} disabled={editSaving} className="flex-1 gap-2">
+                {editSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : "Save Changes"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
