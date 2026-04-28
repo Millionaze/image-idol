@@ -1,38 +1,31 @@
-## What's actually happening
+## Add Edit button to email account cards
 
-You added a new account "Dav Williams" with email `dave@millionaze.net`, but the **Username** field on the account form was filled in as `info@irfanics.com` (likely auto-filled or copy-pasted from the prior "Warmup" account you set up just before it).
+### Changes (single file: `src/pages/Accounts.tsx`)
 
-The IMAP sync uses the `username` field to log into the mailbox — not the `email` field. So Dave's account is logging into `info@irfanics.com`'s mailbox and pulling those messages, then storing them under Dave's `account_id`. That's why you see "random old emails" — they're actually Irfan's emails.
+**1. New state for the edit dialog**
+- `editAccount` (the account being edited, or `null`)
+- `editForm` for the editable fields (`name`, `email`, `username`, `password`, plus host/port for completeness)
+- `editSaving` and `editError` for save state and inline errors
 
-Evidence from the database:
-- `dave@millionaze.net` row has `username = info@irfanics.com`
-- Both Dave and the Warmup account ended at the exact same `last_synced_uid: 143`
+**2. New `Pencil` icon import** from `lucide-react`.
 
-## Fix plan
+**3. New "Edit" icon button on each account card**, placed next to the existing trash button. Clicking it opens the edit dialog pre-filled with the account's values (password field starts empty).
 
-### 1. Clean up Dave's account (database)
-- Update `email_accounts.username` for Dave from `info@irfanics.com` → `dave@millionaze.net` (and have you re-enter the correct password since the saved password is for the wrong mailbox).
-- Delete the wrongly-imported `inbox_messages` rows tied to Dave's `account_id`.
-- Reset `last_synced_uid = 0` on Dave so the next sync starts fresh against the correct mailbox.
+**4. New Edit Dialog** (mirrors the Add Account dialog) with fields:
+- Display Name
+- Email Address (auto-mirrors Username when Username matches the old email — same UX as Add)
+- IMAP / SMTP host & port (so users can fix server settings too)
+- Username (with the same helper text and inline mismatch warning we just added)
+- Password — placeholder "Leave blank to keep current password"
 
-### 2. Improve the Add Account form (src/pages/Accounts.tsx) to prevent recurrence
-- **Auto-fill Username from Email** as the user types in the Email field (only when Username is empty or still matches the previous email value). Most providers use the email as the username.
-- Add helper text under the Username field: *"Usually the same as your email address. Only change this if your provider uses a different IMAP/SMTP login (rare)."*
-- Add a small warning banner if `username` does not match `email` at save time, asking the user to confirm.
+**5. Save behavior**
+- Build an update payload from the form. **Only include `password` if the user typed a new one** (so we don't wipe the saved password by accident).
+- If `username` differs from `email`, show the same `window.confirm` guardrail we added to the Add flow.
+- If `username` or `password` changed, also reset `last_synced_uid = 0` so the next IMAP sync starts fresh against the (possibly different) mailbox and we don't end up with stale UIDs.
+- `UPDATE email_accounts SET ... WHERE id = editAccount.id` via the Supabase client (RLS already restricts to the user's own rows).
+- Toast on success/failure, close the dialog, and `load()` to refresh.
 
-### 3. Defensive backend check (supabase/functions/inbox-sync/index.ts)
-- Optional: log a warning when `account.username` differs from `account.email` so future mismatches are easier to spot in edge function logs.
-
-## Technical notes
-
-- The IMAP sync logic itself is correct — it filters by `account_id` and stores messages under the right account. The bug is purely in the saved credentials, which made the sync log into the wrong mailbox.
-- No schema changes required; only a data fix and a UX tweak.
-- After the fix, clicking "Sync" on Dave's account will fetch the most recent ~50 messages from `dave@millionaze.net`'s actual inbox.
-
-## What I need from you before applying the data fix
-
-The current saved password for Dave is `info@irfanics.com`'s password. Once we wipe Dave's bad messages and reset the username to `dave@millionaze.net`, you'll need to either:
-- Edit Dave's account and re-enter the correct password for `dave@millionaze.net`, or
-- Delete and re-create Dave from scratch (cleaner).
-
-Tell me which you prefer when you approve.
+### Notes
+- No DB schema changes; `email_accounts` already has all the columns.
+- We deliberately do NOT pre-fill the password input — passwords in the DB are stored as-is and re-displaying them is unnecessary and risky.
+- We keep the existing Add flow untouched.

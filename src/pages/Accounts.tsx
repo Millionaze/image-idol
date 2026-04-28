@@ -14,7 +14,7 @@ import { BlacklistStatus } from "@/components/BlacklistStatus";
 import { PlacementTestModal } from "@/components/PlacementTestModal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Trash2, Loader2, Mail, TestTube, ShieldAlert, Info } from "lucide-react";
+import { Plus, Trash2, Loader2, Mail, TestTube, ShieldAlert, Info, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number; smtp_secure: boolean }> = {
