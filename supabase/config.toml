@@ -38,3 +38,19 @@ verify_jwt = false
 
 [functions.warmup-score]
 verify_jwt = false
+
+[functions.event-emit]
+verify_jwt = false
+
+[functions.workflow-event-processor]
+verify_jwt = false
+
+[functions.workflow-runner]
+verify_jwt = false
+
+[functions.webhook-receiver]
+verify_jwt = false
+
+[functions.track-click]
+verify_jwt = false
+

@@ -475,6 +475,44 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Emit email.replied events for non-warmup inbound messages matched to a contact by sender email.
+      try {
+        const { data: account } = await supabaseAdmin
+          .from("email_accounts")
+          .select("user_id")
+          .eq("id", account_id)
+          .single();
+        if (account?.user_id) {
+          for (const msg of messages) {
+            if ((msg as any).is_warmup) continue;
+            const fromEmail = (msg as any).from_email;
+            if (!fromEmail) continue;
+            const { data: contactMatch } = await supabaseAdmin
+              .from("contacts")
+              .select("id, campaign_id, replied_at, campaigns!inner(user_id)")
+              .ilike("email", fromEmail)
+              .eq("campaigns.user_id", account.user_id)
+              .maybeSingle();
+            if (!contactMatch) continue;
+            if (!contactMatch.replied_at) {
+              await supabaseAdmin
+                .from("contacts")
+                .update({ status: "replied", replied_at: new Date().toISOString() })
+                .eq("id", contactMatch.id);
+            }
+            await supabaseAdmin.from("events").insert({
+              user_id: account.user_id,
+              contact_id: contactMatch.id,
+              event_type: "email.replied",
+              source: { account_id, campaign_id: contactMatch.campaign_id },
+              payload: { subject: (msg as any).subject ?? null },
+            });
+          }
+        }
+      } catch (e) {
+        console.error("inbox-sync reply event emit failed:", e);
+      }
+
       if (maxUid > lastSyncedUid) {
         await supabaseAdmin
           .from("email_accounts")

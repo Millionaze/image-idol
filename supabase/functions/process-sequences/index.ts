@@ -124,10 +124,23 @@ Deno.serve(async (req) => {
           status: "sent",
         }).eq("id", contact.id);
 
+        // Emit workflow events
+        const events: any[] = [
+          { user_id: campaign.user_id, contact_id: contact.id, event_type: "email.sent", source: { campaign_id: campaign.id, sequence_step_id: step.id, account_id: account.id }, payload: { subject } },
+        ];
+        if (state.current_step === 1) {
+          events.unshift({ user_id: campaign.user_id, contact_id: contact.id, event_type: "campaign.started", source: { campaign_id: campaign.id }, payload: {} });
+        }
+        await supabase.from("events").insert(events);
+
         processed++;
       } catch (e: any) {
         console.error(`Sequence send failed for ${contact.email}:`, e.message);
         await supabase.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
+        await supabase.from("events").insert({
+          user_id: campaign.user_id, contact_id: contact.id, event_type: "email.bounced",
+          source: { campaign_id: campaign.id, sequence_step_id: step.id }, payload: { error: e.message },
+        });
       }
     }
 

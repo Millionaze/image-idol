@@ -145,12 +145,22 @@ Deno.serve(async (req) => {
         await supabaseAdmin.from("contacts").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", contact.id);
         sentCount++;
 
+        // Emit workflow events
+        await supabaseAdmin.from("events").insert([
+          { user_id: user.id, contact_id: contact.id, event_type: "campaign.started", source: { campaign_id: campaign_id }, payload: {} },
+          { user_id: user.id, contact_id: contact.id, event_type: "email.sent", source: { campaign_id: campaign_id, account_id: account.id }, payload: { subject } },
+        ]);
+
         if (sentCount < pendingContacts.length) {
           await new Promise((r) => setTimeout(r, 1500));
         }
       } catch (e) {
         console.error(`Failed to send to ${contact.email}:`, e);
         await supabaseAdmin.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
+        await supabaseAdmin.from("events").insert({
+          user_id: user.id, contact_id: contact.id, event_type: "email.bounced",
+          source: { campaign_id: campaign_id }, payload: { error: String((e as any)?.message ?? e) },
+        });
         bounceCount++;
       }
     }
