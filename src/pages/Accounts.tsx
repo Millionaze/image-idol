@@ -124,6 +124,21 @@ export default function Accounts() {
 
   const saveAccount = async () => {
     if (!user) return;
+
+    // Guardrail: warn if the IMAP/SMTP username doesn't match the account email.
+    // A mismatch usually means the wrong mailbox will be synced (which has caused
+    // "I see someone else's emails in this account" bugs).
+    if (
+      form.username.trim().toLowerCase() !== form.email.trim().toLowerCase()
+    ) {
+      const ok = window.confirm(
+        `The Username (${form.username}) does not match the Email Address (${form.email}).\n\n` +
+        `This means the IMAP/SMTP server will log into the "${form.username}" mailbox, not "${form.email}".\n\n` +
+        `Most providers use the email as the username. Continue only if you're sure this is correct.`
+      );
+      if (!ok) return;
+    }
+
     setSmtpError(null);
     setTesting(true);
     try {
@@ -231,7 +246,24 @@ export default function Accounts() {
                   </div>
                   <div className="space-y-2">
                     <Label>Email Address</Label>
-                    <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="you@gmail.com" />
+                    <Input
+                      value={form.email}
+                      onChange={(e) => {
+                        const newEmail = e.target.value;
+                        setForm((f) => {
+                          // Auto-mirror username when it's empty or still tracking the old email.
+                          // Lets users override the username afterward without us clobbering it.
+                          const shouldMirror =
+                            !f.username || f.username === f.email;
+                          return {
+                            ...f,
+                            email: newEmail,
+                            username: shouldMirror ? newEmail : f.username,
+                          };
+                        });
+                      }}
+                      placeholder="you@gmail.com"
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -243,7 +275,18 @@ export default function Accounts() {
                   <div className="space-y-2"><Label>IMAP Port</Label><Input type="number" value={form.imap_port} onChange={(e) => setForm((f) => ({ ...f, imap_port: parseInt(e.target.value) }))} /></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2"><Label>Username</Label><Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} /></div>
+                  <div className="space-y-2">
+                    <Label>Username</Label>
+                    <Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} />
+                    <p className="text-xs text-muted-foreground">
+                      Usually the same as your email. Only change this if your provider uses a different IMAP/SMTP login (rare).
+                    </p>
+                    {form.username && form.email && form.username.trim().toLowerCase() !== form.email.trim().toLowerCase() && (
+                      <p className="text-xs text-destructive">
+                        ⚠ Username does not match Email — you'll sync the "{form.username}" mailbox, not "{form.email}".
+                      </p>
+                    )}
+                  </div>
                   <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
                 </div>
                 <div className="flex items-center gap-2">
