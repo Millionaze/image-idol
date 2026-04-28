@@ -1815,7 +1815,13 @@ export type Database = {
     }
     Enums: {
       campaign_status: "draft" | "sending" | "active" | "paused"
-      contact_status: "pending" | "sent" | "opened" | "bounced" | "replied"
+      contact_status:
+        | "pending"
+        | "sent"
+        | "opened"
+        | "bounced"
+        | "replied"
+        | "failed"
       sequence_condition: "no_open" | "open_no_reply" | "link_click" | "always"
       sequence_state_status: "active" | "completed" | "paused"
       warmup_log_type:
@@ -1951,7 +1957,14 @@ export const Constants = {
   public: {
     Enums: {
       campaign_status: ["draft", "sending", "active", "paused"],
-      contact_status: ["pending", "sent", "opened", "bounced", "replied"],
+      contact_status: [
+        "pending",
+        "sent",
+        "opened",
+        "bounced",
+        "replied",
+        "failed",
+      ],
       sequence_condition: ["no_open", "open_no_reply", "link_click", "always"],
       sequence_state_status: ["active", "completed", "paused"],
       warmup_log_type: [
