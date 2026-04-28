@@ -1,4 +1,4 @@
-import { Flame, LayoutDashboard, Zap, Mail, Megaphone, Inbox, LogOut, Settings, BarChart3, Mail as MailIcon, Filter, PenLine, Target, CalendarDays, ClipboardCheck, Shuffle, Users } from "lucide-react";
+import { Flame, LayoutDashboard, Zap, Mail, Megaphone, Inbox, LogOut, Settings, BarChart3, Mail as MailIcon, Filter, PenLine, Target, CalendarDays, ClipboardCheck, Shuffle, Users, Workflow, LayoutList } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -28,6 +28,8 @@ const mainItems = [
   { title: "Unibox", url: "/unibox", icon: Inbox },
   { title: "Inbox", url: "/inbox", icon: MailIcon },
   { title: "Contacts", url: "/contacts", icon: Users },
+  { title: "Pipeline", url: "/pipeline", icon: LayoutList },
+  { title: "Workflows", url: "/workflows", icon: Workflow },
 ];
 
 const toolItems = [

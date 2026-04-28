@@ -10,6 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Loader2, Trash2, CheckCircle, XCircle, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TagManager } from "@/components/settings/TagManager";
+import { CustomFieldManager } from "@/components/settings/CustomFieldManager";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -174,14 +177,22 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-4xl">
       <h1 className="text-2xl font-bold">Settings</h1>
 
-      {/* Profile */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Profile</CardTitle>
-        </CardHeader>
+      <Tabs defaultValue="general">
+        <TabsList>
+          <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="tags">Tags</TabsTrigger>
+          <TabsTrigger value="fields">Custom Fields</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="general" className="space-y-6 mt-4">
+          {/* Profile */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Profile</CardTitle>
+            </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>Email</Label>
@@ -320,6 +331,11 @@ export default function Settings() {
           </AlertDialog>
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="tags" className="mt-4"><TagManager /></TabsContent>
+        <TabsContent value="fields" className="mt-4"><CustomFieldManager /></TabsContent>
+      </Tabs>
     </div>
   );
 }
