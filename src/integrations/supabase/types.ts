@@ -231,7 +231,22 @@ export type Database = {
           value_number?: number | null
           value_text?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "contact_custom_values_contact_fk"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_custom_values_field_fk"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "custom_field_definitions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       contact_lists: {
         Row: {
@@ -327,7 +342,29 @@ export type Database = {
           contact_id?: string
           tag_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "contact_tags_contact_fk"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_tags_tag_fk"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_tags_workflow_fk"
+            columns: ["added_by_workflow_id"]
+            isOneToOne: false
+            referencedRelation: "workflows"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       contacts: {
         Row: {
@@ -378,6 +415,20 @@ export type Database = {
             columns: ["campaign_id"]
             isOneToOne: false
             referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_pipeline_fk"
+            columns: ["pipeline_id"]
+            isOneToOne: false
+            referencedRelation: "pipelines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_pipeline_stage_fk"
+            columns: ["pipeline_stage_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_stages"
             referencedColumns: ["id"]
           },
         ]
@@ -641,7 +692,15 @@ export type Database = {
           source?: Json
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "events_contact_fk"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       inbox_messages: {
         Row: {
@@ -833,7 +892,43 @@ export type Database = {
           to_stage_id?: string
           workflow_run_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "psh_contact_fk"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "psh_from_stage_fk"
+            columns: ["from_stage_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "psh_pipeline_fk"
+            columns: ["pipeline_id"]
+            isOneToOne: false
+            referencedRelation: "pipelines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "psh_run_fk"
+            columns: ["workflow_run_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "psh_to_stage_fk"
+            columns: ["to_stage_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_stages"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       pipeline_stages: {
         Row: {
@@ -866,7 +961,15 @@ export type Database = {
           pipeline_id?: string
           position?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_stages_pipeline_fk"
+            columns: ["pipeline_id"]
+            isOneToOne: false
+            referencedRelation: "pipelines"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       pipelines: {
         Row: {
@@ -1514,7 +1617,15 @@ export type Database = {
           response_status?: number | null
           status?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "webhook_deliveries_endpoint_fk"
+            columns: ["endpoint_id"]
+            isOneToOne: false
+            referencedRelation: "webhook_endpoints"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       webhook_endpoints: {
         Row: {
@@ -1583,7 +1694,15 @@ export type Database = {
           run_id?: string
           status?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "workflow_run_log_run_fk"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       workflow_runs: {
         Row: {
@@ -1625,7 +1744,22 @@ export type Database = {
           triggered_by?: Json | null
           workflow_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "workflow_runs_contact_fk"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workflow_runs_workflow_fk"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "workflows"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       workflows: {
         Row: {
