@@ -43,6 +43,82 @@ export default function Accounts() {
   const [placementOpen, setPlacementOpen] = useState(false);
   const [blacklistResults, setBlacklistResults] = useState<Record<string, { is_clean: boolean; listed_on: string[] }>>({});
 
+  // Edit dialog state
+  const [editAccount, setEditAccount] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState(emptyForm);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const openEditDialog = (a: any) => {
+    setEditError(null);
+    setEditAccount(a);
+    setEditForm({
+      name: a.name || "",
+      email: a.email || "",
+      smtp_host: a.smtp_host || "",
+      smtp_port: a.smtp_port || 587,
+      smtp_secure: a.smtp_secure ?? true,
+      imap_host: a.imap_host || "",
+      imap_port: a.imap_port || 993,
+      username: a.username || "",
+      password: "", // never pre-fill — leave blank to keep current
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editAccount) return;
+    setEditError(null);
+
+    // Same guardrail as Add: warn if username doesn't match email
+    if (editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase()) {
+      const ok = window.confirm(
+        `The Username (${editForm.username}) does not match the Email Address (${editForm.email}).\n\n` +
+        `This means the IMAP/SMTP server will log into the "${editForm.username}" mailbox, not "${editForm.email}".\n\n` +
+        `Continue only if you're sure this is correct.`
+      );
+      if (!ok) return;
+    }
+
+    const update: any = {
+      name: editForm.name,
+      email: editForm.email,
+      smtp_host: editForm.smtp_host,
+      smtp_port: editForm.smtp_port,
+      smtp_secure: editForm.smtp_secure,
+      imap_host: editForm.imap_host,
+      imap_port: editForm.imap_port,
+      username: editForm.username,
+    };
+
+    // Only update password if user typed something
+    const passwordChanged = editForm.password.length > 0;
+    if (passwordChanged) update.password = editForm.password;
+
+    // If credentials/mailbox changed, reset sync cursor so we don't skip messages in the new mailbox
+    const usernameChanged = editForm.username !== editAccount.username;
+    if (usernameChanged || passwordChanged) {
+      update.last_synced_uid = 0;
+    }
+
+    setEditSaving(true);
+    try {
+      const { error } = await supabase.from("email_accounts").update(update).eq("id", editAccount.id);
+      if (error) throw error;
+      toast({
+        title: "Account updated",
+        description: usernameChanged || passwordChanged
+          ? "Sync cursor reset — click Sync to refresh from the new mailbox."
+          : undefined,
+      });
+      setEditAccount(null);
+      load();
+    } catch (e: any) {
+      setEditError(e.message || "Failed to update account");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const load = async () => {
     if (!user) return;
     try {
