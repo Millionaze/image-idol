@@ -126,26 +126,30 @@ Deno.serve(async (req) => {
 
     let sentCount = 0;
     let bounceCount = 0;
+    let failedCount = 0;
 
     for (const contact of pendingContacts) {
       try {
         const contactName = contact.name || contact.email.split("@")[0];
 
-        const subject = campaign.subject
+        const rawSubject = campaign.subject
           .replace(/\{\{name\}\}/g, contactName)
           .replace(/\{\{email\}\}/g, contact.email);
+        const subject = sanitizeSubject(rawSubject);
 
         const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
-        const body = campaign.body
+        const rawBody = campaign.body
           .replace(/\{\{name\}\}/g, contactName)
           .replace(/\{\{email\}\}/g, contact.email) + trackingPixel;
+        const html = sanitizeForSmtp(rawBody);
+        const text = htmlToText(rawBody);
 
         await client.send({
           from: account.email,
           to: contact.email,
           subject,
-          content: "auto",
-          html: body,
+          content: text,
+          html,
         });
 
         await supabaseAdmin.from("contacts").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", contact.id);
@@ -161,17 +165,37 @@ Deno.serve(async (req) => {
           await new Promise((r) => setTimeout(r, 1500));
         }
       } catch (e) {
-        console.error(`Failed to send to ${contact.email}:`, e);
-        await supabaseAdmin.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
+        const classified = classifySmtpError(e);
+        console.error(`Send failed for ${contact.email} [${classified.kind} code=${classified.code}]:`, classified.message);
+
+        if (classified.kind === "bounced") {
+          await supabaseAdmin.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
+          bounceCount++;
+        } else if (classified.kind === "transient") {
+          // leave as pending so it retries on the next run
+          failedCount++;
+        } else {
+          await supabaseAdmin.from("contacts").update({ status: "failed" }).eq("id", contact.id);
+          failedCount++;
+        }
+
         await supabaseAdmin.from("events").insert({
-          user_id: user.id, contact_id: contact.id, event_type: "email.bounced",
-          source: { campaign_id: campaign_id }, payload: { error: String((e as any)?.message ?? e) },
+          user_id: user.id, contact_id: contact.id,
+          event_type: classified.kind === "bounced" ? "email.bounced" : "email.failed",
+          source: { campaign_id: campaign_id },
+          payload: { error: classified.message, code: classified.code, kind: classified.kind },
         });
-        bounceCount++;
+
+        // SMTP DATA-mode failures kill the connection — stop the batch and let
+        // the next run reopen a fresh client instead of marking everyone failed.
+        if (classified.connectionFatal) {
+          console.error("SMTP connection no longer recoverable — aborting batch.");
+          break;
+        }
       }
     }
 
-    await client.close();
+    try { await client.close(); } catch (_) { /* ignore */ }
 
     await supabaseAdmin.from("campaigns").update({
       sent_count: campaign.sent_count + sentCount,
