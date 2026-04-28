@@ -418,9 +418,14 @@ export default function Accounts() {
                         <p className="text-sm text-muted-foreground">{a.email}</p>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={() => deleteAccount(a.id)} className="text-muted-foreground hover:text-destructive">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(a)} className="text-muted-foreground hover:text-foreground" title="Edit account">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => deleteAccount(a.id)} className="text-muted-foreground hover:text-destructive" title="Delete account">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between text-sm">
