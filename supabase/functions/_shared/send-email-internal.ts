@@ -2,6 +2,13 @@
 // and the workflow action executor.
 
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import {
+  sanitizeForSmtp,
+  sanitizeSubject,
+  htmlToText,
+  classifySmtpError,
+  type SmtpFailureKind,
+} from "./smtp-helpers.ts";
 
 export interface SendEmailParams {
   account: {
@@ -25,7 +32,7 @@ export interface SendEmailParams {
 
 export async function sendEmailViaAccount(
   params: SendEmailParams,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; failureKind?: SmtpFailureKind; code?: number | null }> {
   const { account, to, subject, htmlBody, contactId, trackOpens = true } = params;
 
   let body = htmlBody;
@@ -36,6 +43,10 @@ export async function sendEmailViaAccount(
         : params.trackingBaseUrl ?? `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
     body += `<img src="${base}?id=${contactId}" width="1" height="1" style="display:none;border:0;" alt="" />`;
   }
+
+  const html = sanitizeForSmtp(body);
+  const text = htmlToText(body);
+  const safeSubject = sanitizeSubject(subject);
 
   const client = new SMTPClient({
     connection: {
@@ -50,15 +61,21 @@ export async function sendEmailViaAccount(
     await client.send({
       from: account.email,
       to,
-      subject,
-      content: "auto",
-      html: body,
+      subject: safeSubject,
+      content: text,
+      html,
     });
-    await client.close();
+    try { await client.close(); } catch { /* ignore */ }
     return { success: true };
   } catch (e: any) {
     try { await client.close(); } catch { /* ignore */ }
-    return { success: false, error: e?.message ?? "SMTP error" };
+    const classified = classifySmtpError(e);
+    return {
+      success: false,
+      error: classified.message,
+      failureKind: classified.kind,
+      code: classified.code,
+    };
   }
 }
 
