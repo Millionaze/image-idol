@@ -89,9 +89,9 @@ function WorkflowsInner() {
           user_id: user!.id,
           name: "Untitled workflow",
           status: "draft",
-          graph: { nodes: initialNodes, edges: [] },
-          trigger_config: { trigger_type: "manual_trigger" },
-        })
+          graph: { nodes: initialNodes, edges: [] } as any,
+          trigger_config: { trigger_type: "manual_trigger" } as any,
+        } as any)
         .select("id")
         .single();
       if (error) throw error;
@@ -264,7 +264,7 @@ function WorkflowEditor({ workflowId }: { workflowId: string }) {
     if (pendingConnection?.source) {
       setEdges((eds) =>
         addEdge(
-          { source: pendingConnection.source!, sourceHandle: pendingConnection.sourceHandle, target: id, type: "default" },
+          { id: newId("e"), source: pendingConnection.source!, sourceHandle: pendingConnection.sourceHandle, target: id, type: "default" },
           eds,
         ),
       );
@@ -296,8 +296,8 @@ function WorkflowEditor({ workflowId }: { workflowId: string }) {
         .update({
           name,
           status,
-          graph: { nodes, edges },
-          trigger_config,
+          graph: { nodes, edges } as any,
+          trigger_config: trigger_config as any,
           updated_at: new Date().toISOString(),
         })
         .eq("id", workflowId);
