@@ -24,6 +24,7 @@ import SubjectTester from "@/pages/tools/SubjectTester";
 import SendPlanner from "@/pages/tools/SendPlanner";
 import AuditReport from "@/pages/tools/AuditReport";
 import Spintax from "@/pages/tools/Spintax";
+import WorkflowsDebug from "@/pages/admin/WorkflowsDebug";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +54,7 @@ const App = () => (
               <Route path="/tools/send-planner" element={<SendPlanner />} />
               <Route path="/tools/audit-report" element={<AuditReport />} />
               <Route path="/tools/spintax" element={<Spintax />} />
+              <Route path="/admin/workflows-debug" element={<WorkflowsDebug />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
