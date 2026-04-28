@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
 
         const { data: campaign } = await supabase
           .from("campaigns")
-          .select("open_count")
+          .select("open_count, user_id")
           .eq("id", contact.campaign_id)
           .single();
 
@@ -36,6 +36,15 @@ Deno.serve(async (req) => {
           await supabase.from("campaigns").update({
             open_count: campaign.open_count + 1,
           }).eq("id", contact.campaign_id);
+
+          // Emit workflow event
+          await supabase.from("events").insert({
+            user_id: campaign.user_id,
+            contact_id: contactId,
+            event_type: "email.opened",
+            source: { campaign_id: contact.campaign_id },
+            payload: {},
+          });
         }
       }
     } catch (e) {
