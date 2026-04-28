@@ -71,15 +71,18 @@ Deno.serve(async (req) => {
 
       try {
         const contactName = contact.name || contact.email.split("@")[0];
-        const subject = step.subject
+        const rawSubject = step.subject
           .replace(/\{\{name\}\}/g, contactName)
           .replace(/\{\{email\}\}/g, contact.email);
+        const subject = sanitizeSubject(rawSubject);
 
         const trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
         const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
-        const body = step.body
+        const rawBody = step.body
           .replace(/\{\{name\}\}/g, contactName)
           .replace(/\{\{email\}\}/g, contact.email) + trackingPixel;
+        const html = sanitizeForSmtp(rawBody);
+        const text = htmlToText(rawBody);
 
         const client = new SMTPClient({
           connection: {
@@ -94,11 +97,10 @@ Deno.serve(async (req) => {
           from: account.email,
           to: contact.email,
           subject,
-          content: "auto",
-          html: body,
+          content: text,
+          html,
         });
-        await client.close();
-
+        try { await client.close(); } catch { /* ignore */ }
         // Get next step
         const { data: nextStep } = await supabase
           .from("sequence_steps")
