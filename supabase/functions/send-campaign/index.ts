@@ -203,7 +203,10 @@ Deno.serve(async (req) => {
       status: "active",
     }).eq("id", campaign_id);
 
-    return new Response(JSON.stringify({ message: `Sent ${sentCount} emails, ${bounceCount} bounced` }), {
+    return new Response(JSON.stringify({
+      message: `Sent ${sentCount}, bounced ${bounceCount}, failed ${failedCount}`,
+      sent: sentCount, bounced: bounceCount, failed: failedCount,
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: any) {
