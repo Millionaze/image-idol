@@ -143,11 +143,21 @@ Deno.serve(async (req) => {
 
         processed++;
       } catch (e: any) {
-        console.error(`Sequence send failed for ${contact.email}:`, e.message);
-        await supabase.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
+        const classified = classifySmtpError(e);
+        console.error(`Sequence send for ${contact.email} [${classified.kind} code=${classified.code}]:`, classified.message);
+
+        if (classified.kind === "bounced") {
+          await supabase.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
+        } else if (classified.kind === "failed") {
+          await supabase.from("contacts").update({ status: "failed" }).eq("id", contact.id);
+        }
+        // transient: leave contact as-is, sequence state will retry on next cron tick
+
         await supabase.from("events").insert({
-          user_id: campaign.user_id, contact_id: contact.id, event_type: "email.bounced",
-          source: { campaign_id: campaign.id, sequence_step_id: step.id }, payload: { error: e.message },
+          user_id: campaign.user_id, contact_id: contact.id,
+          event_type: classified.kind === "bounced" ? "email.bounced" : "email.failed",
+          source: { campaign_id: campaign.id, sequence_step_id: step.id },
+          payload: { error: classified.message, code: classified.code, kind: classified.kind },
         });
       }
     }
