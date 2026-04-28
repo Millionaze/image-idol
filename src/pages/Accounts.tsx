@@ -499,6 +499,80 @@ export default function Accounts() {
       )}
 
       <PlacementTestModal open={placementOpen} onOpenChange={setPlacementOpen} />
+
+      {/* Edit Account Dialog */}
+      <Dialog open={!!editAccount} onOpenChange={(v) => { if (!v) { setEditAccount(null); setEditError(null); } }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Email Account</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Display Name</Label>
+                <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Email Address</Label>
+                <Input
+                  value={editForm.email}
+                  onChange={(e) => {
+                    const newEmail = e.target.value;
+                    setEditForm((f) => {
+                      const shouldMirror = !f.username || f.username === f.email;
+                      return { ...f, email: newEmail, username: shouldMirror ? newEmail : f.username };
+                    });
+                  }}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><Label>SMTP Host</Label><Input value={editForm.smtp_host} onChange={(e) => setEditForm((f) => ({ ...f, smtp_host: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>SMTP Port</Label><Input type="number" value={editForm.smtp_port} onChange={(e) => setEditForm((f) => ({ ...f, smtp_port: parseInt(e.target.value) }))} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><Label>IMAP Host</Label><Input value={editForm.imap_host} onChange={(e) => setEditForm((f) => ({ ...f, imap_host: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>IMAP Port</Label><Input type="number" value={editForm.imap_port} onChange={(e) => setEditForm((f) => ({ ...f, imap_port: parseInt(e.target.value) }))} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Username</Label>
+                <Input value={editForm.username} onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))} />
+                <p className="text-xs text-muted-foreground">
+                  Usually the same as your email. Only change this if your provider uses a different IMAP/SMTP login (rare).
+                </p>
+                {editForm.username && editForm.email && editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase() && (
+                  <p className="text-xs text-destructive">
+                    ⚠ Username does not match Email — you'll sync the "{editForm.username}" mailbox, not "{editForm.email}".
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Password</Label>
+                <Input
+                  type="password"
+                  value={editForm.password}
+                  onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
+                  placeholder="Leave blank to keep current password"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={editForm.smtp_secure} onCheckedChange={(v) => setEditForm((f) => ({ ...f, smtp_secure: v }))} />
+              <Label>Use TLS/SSL</Label>
+            </div>
+            {editError && (
+              <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">{editError}</div>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditAccount(null)} disabled={editSaving} className="flex-1">Cancel</Button>
+              <Button onClick={saveEdit} disabled={editSaving} className="flex-1 gap-2">
+                {editSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : "Save Changes"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
