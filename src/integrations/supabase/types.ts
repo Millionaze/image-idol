@@ -203,6 +203,36 @@ export type Database = {
           },
         ]
       }
+      contact_custom_values: {
+        Row: {
+          contact_id: string
+          field_id: string
+          updated_at: string
+          value_boolean: boolean | null
+          value_date: string | null
+          value_number: number | null
+          value_text: string | null
+        }
+        Insert: {
+          contact_id: string
+          field_id: string
+          updated_at?: string
+          value_boolean?: boolean | null
+          value_date?: string | null
+          value_number?: number | null
+          value_text?: string | null
+        }
+        Update: {
+          contact_id?: string
+          field_id?: string
+          updated_at?: string
+          value_boolean?: boolean | null
+          value_date?: string | null
+          value_number?: number | null
+          value_text?: string | null
+        }
+        Relationships: []
+      }
       contact_lists: {
         Row: {
           created_at: string
@@ -278,6 +308,27 @@ export type Database = {
           },
         ]
       }
+      contact_tags: {
+        Row: {
+          added_at: string
+          added_by_workflow_id: string | null
+          contact_id: string
+          tag_id: string
+        }
+        Insert: {
+          added_at?: string
+          added_by_workflow_id?: string | null
+          contact_id: string
+          tag_id: string
+        }
+        Update: {
+          added_at?: string
+          added_by_workflow_id?: string | null
+          contact_id?: string
+          tag_id?: string
+        }
+        Relationships: []
+      }
       contacts: {
         Row: {
           campaign_id: string
@@ -285,6 +336,10 @@ export type Database = {
           id: string
           name: string | null
           opened_at: string | null
+          pipeline_entered_at: string | null
+          pipeline_id: string | null
+          pipeline_stage_entered_at: string | null
+          pipeline_stage_id: string | null
           replied_at: string | null
           sent_at: string | null
           status: Database["public"]["Enums"]["contact_status"]
@@ -295,6 +350,10 @@ export type Database = {
           id?: string
           name?: string | null
           opened_at?: string | null
+          pipeline_entered_at?: string | null
+          pipeline_id?: string | null
+          pipeline_stage_entered_at?: string | null
+          pipeline_stage_id?: string | null
           replied_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["contact_status"]
@@ -305,6 +364,10 @@ export type Database = {
           id?: string
           name?: string | null
           opened_at?: string | null
+          pipeline_entered_at?: string | null
+          pipeline_id?: string | null
+          pipeline_stage_entered_at?: string | null
+          pipeline_stage_id?: string | null
           replied_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["contact_status"]
@@ -358,6 +421,36 @@ export type Database = {
           variation_a?: Json | null
           variation_b?: Json | null
           variation_c?: Json | null
+        }
+        Relationships: []
+      }
+      custom_field_definitions: {
+        Row: {
+          created_at: string
+          field_type: string
+          id: string
+          key: string
+          label: string
+          options: Json | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          field_type: string
+          id?: string
+          key: string
+          label: string
+          options?: Json | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          field_type?: string
+          id?: string
+          key?: string
+          label?: string
+          options?: Json | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -481,6 +574,72 @@ export type Database = {
           warmup_total_received?: number
           warmup_total_sent?: number
           warmup_weekdays_only?: boolean
+        }
+        Relationships: []
+      }
+      event_dlq: {
+        Row: {
+          created_at: string
+          error: string
+          event_type: string
+          id: string
+          original_event_id: string | null
+          payload: Json | null
+        }
+        Insert: {
+          created_at?: string
+          error: string
+          event_type: string
+          id?: string
+          original_event_id?: string | null
+          payload?: Json | null
+        }
+        Update: {
+          created_at?: string
+          error?: string
+          event_type?: string
+          id?: string
+          original_event_id?: string | null
+          payload?: Json | null
+        }
+        Relationships: []
+      }
+      events: {
+        Row: {
+          contact_id: string | null
+          error: string | null
+          event_type: string
+          id: string
+          occurred_at: string
+          payload: Json
+          processed_at: string | null
+          processing_status: string
+          source: Json
+          user_id: string
+        }
+        Insert: {
+          contact_id?: string | null
+          error?: string | null
+          event_type: string
+          id?: string
+          occurred_at?: string
+          payload?: Json
+          processed_at?: string | null
+          processing_status?: string
+          source?: Json
+          user_id: string
+        }
+        Update: {
+          contact_id?: string | null
+          error?: string | null
+          event_type?: string
+          id?: string
+          occurred_at?: string
+          payload?: Json
+          processed_at?: string | null
+          processing_status?: string
+          source?: Json
+          user_id?: string
         }
         Relationships: []
       }
@@ -642,6 +801,102 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      pipeline_stage_history: {
+        Row: {
+          changed_at: string
+          changed_by: string
+          contact_id: string
+          from_stage_id: string | null
+          id: string
+          pipeline_id: string
+          to_stage_id: string
+          workflow_run_id: string | null
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string
+          contact_id: string
+          from_stage_id?: string | null
+          id?: string
+          pipeline_id: string
+          to_stage_id: string
+          workflow_run_id?: string | null
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string
+          contact_id?: string
+          from_stage_id?: string | null
+          id?: string
+          pipeline_id?: string
+          to_stage_id?: string
+          workflow_run_id?: string | null
+        }
+        Relationships: []
+      }
+      pipeline_stages: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          is_lost: boolean
+          is_won: boolean
+          name: string
+          pipeline_id: string
+          position: number
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_lost?: boolean
+          is_won?: boolean
+          name: string
+          pipeline_id: string
+          position?: number
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_lost?: boolean
+          is_won?: boolean
+          name?: string
+          pipeline_id?: string
+          position?: number
+        }
+        Relationships: []
+      }
+      pipelines: {
+        Row: {
+          archived: boolean
+          created_at: string
+          description: string | null
+          id: string
+          is_default: boolean
+          name: string
+          user_id: string
+        }
+        Insert: {
+          archived?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_default?: boolean
+          name: string
+          user_id: string
+        }
+        Update: {
+          archived?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_default?: boolean
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       placement_results: {
         Row: {
@@ -917,6 +1172,30 @@ export type Database = {
           spam_score?: number | null
           subject_line?: string
           suggestions?: Json | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      tags: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          name: string
+          user_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          name?: string
           user_id?: string
         }
         Relationships: []
@@ -1198,12 +1477,207 @@ export type Database = {
           },
         ]
       }
+      webhook_deliveries: {
+        Row: {
+          attempt: number
+          created_at: string
+          delivered_at: string | null
+          direction: string
+          endpoint_id: string
+          id: string
+          payload: Json
+          response_body: string | null
+          response_status: number | null
+          status: string
+        }
+        Insert: {
+          attempt?: number
+          created_at?: string
+          delivered_at?: string | null
+          direction: string
+          endpoint_id: string
+          id?: string
+          payload?: Json
+          response_body?: string | null
+          response_status?: number | null
+          status?: string
+        }
+        Update: {
+          attempt?: number
+          created_at?: string
+          delivered_at?: string | null
+          direction?: string
+          endpoint_id?: string
+          id?: string
+          payload?: Json
+          response_body?: string | null
+          response_status?: number | null
+          status?: string
+        }
+        Relationships: []
+      }
+      webhook_endpoints: {
+        Row: {
+          created_at: string
+          direction: string
+          events: Json
+          id: string
+          name: string
+          secret: string
+          status: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          direction: string
+          events?: Json
+          id?: string
+          name: string
+          secret: string
+          status?: string
+          url: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          direction?: string
+          events?: Json
+          id?: string
+          name?: string
+          secret?: string
+          status?: string
+          url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      workflow_run_log: {
+        Row: {
+          duration_ms: number | null
+          executed_at: string
+          id: string
+          node_id: string
+          node_type: string
+          result: Json | null
+          run_id: string
+          status: string
+        }
+        Insert: {
+          duration_ms?: number | null
+          executed_at?: string
+          id?: string
+          node_id: string
+          node_type: string
+          result?: Json | null
+          run_id: string
+          status: string
+        }
+        Update: {
+          duration_ms?: number | null
+          executed_at?: string
+          id?: string
+          node_id?: string
+          node_type?: string
+          result?: Json | null
+          run_id?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      workflow_runs: {
+        Row: {
+          completed_at: string | null
+          contact_id: string
+          context: Json
+          current_node_id: string | null
+          error: string | null
+          id: string
+          next_action_at: string | null
+          started_at: string
+          status: string
+          triggered_by: Json | null
+          workflow_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          contact_id: string
+          context?: Json
+          current_node_id?: string | null
+          error?: string | null
+          id?: string
+          next_action_at?: string | null
+          started_at?: string
+          status?: string
+          triggered_by?: Json | null
+          workflow_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          contact_id?: string
+          context?: Json
+          current_node_id?: string | null
+          error?: string | null
+          id?: string
+          next_action_at?: string | null
+          started_at?: string
+          status?: string
+          triggered_by?: Json | null
+          workflow_id?: string
+        }
+        Relationships: []
+      }
+      workflows: {
+        Row: {
+          created_at: string
+          description: string | null
+          exit_conditions: Json
+          graph: Json
+          id: string
+          name: string
+          stats: Json
+          status: string
+          trigger_config: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          exit_conditions?: Json
+          graph?: Json
+          id?: string
+          name: string
+          stats?: Json
+          status?: string
+          trigger_config?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          exit_conditions?: Json
+          graph?: Json
+          id?: string
+          name?: string
+          stats?: Json
+          status?: string
+          trigger_config?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      seed_workflow_defaults_for_user: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       campaign_status: "draft" | "sending" | "active" | "paused"
