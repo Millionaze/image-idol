@@ -1,62 +1,38 @@
-## Backend Audit — Remediation Plan
+## What's actually happening
 
-The audit passed 11/14 checks. Three gaps need fixing before building UI on top.
+You added a new account "Dav Williams" with email `dave@millionaze.net`, but the **Username** field on the account form was filled in as `info@irfanics.com` (likely auto-filled or copy-pasted from the prior "Warmup" account you set up just before it).
 
-### 1. Migration: add missing PRIMARY KEYs and FOREIGN KEYs
+The IMAP sync uses the `username` field to log into the mailbox — not the `email` field. So Dave's account is logging into `info@irfanics.com`'s mailbox and pulling those messages, then storing them under Dave's `account_id`. That's why you see "random old emails" — they're actually Irfan's emails.
 
-Run a single migration that adds the integrity constraints Lovable's first migration omitted.
+Evidence from the database:
+- `dave@millionaze.net` row has `username = info@irfanics.com`
+- Both Dave and the Warmup account ended at the exact same `last_synced_uid: 143`
 
-**Composite primary keys** (currently missing → duplicates possible, breaks `ON CONFLICT`):
-- `contact_tags` → PK `(contact_id, tag_id)`
-- `contact_custom_values` → PK `(contact_id, field_id)`
+## Fix plan
 
-**Foreign keys with ON DELETE CASCADE** (currently missing → orphan rows):
+### 1. Clean up Dave's account (database)
+- Update `email_accounts.username` for Dave from `info@irfanics.com` → `dave@millionaze.net` (and have you re-enter the correct password since the saved password is for the wrong mailbox).
+- Delete the wrongly-imported `inbox_messages` rows tied to Dave's `account_id`.
+- Reset `last_synced_uid = 0` on Dave so the next sync starts fresh against the correct mailbox.
 
-| Table | Column | References | On Delete |
-|---|---|---|---|
-| contact_tags | contact_id | contacts(id) | CASCADE |
-| contact_tags | tag_id | tags(id) | CASCADE |
-| contact_tags | added_by_workflow_id | workflows(id) | SET NULL |
-| contact_custom_values | contact_id | contacts(id) | CASCADE |
-| contact_custom_values | field_id | custom_field_definitions(id) | CASCADE |
-| pipeline_stages | pipeline_id | pipelines(id) | CASCADE |
-| pipeline_stage_history | contact_id | contacts(id) | CASCADE |
-| pipeline_stage_history | pipeline_id | pipelines(id) | CASCADE |
-| pipeline_stage_history | from_stage_id | pipeline_stages(id) | SET NULL |
-| pipeline_stage_history | to_stage_id | pipeline_stages(id) | SET NULL |
-| pipeline_stage_history | workflow_run_id | workflow_runs(id) | SET NULL |
-| workflow_runs | workflow_id | workflows(id) | CASCADE |
-| workflow_runs | contact_id | contacts(id) | CASCADE |
-| workflow_run_log | run_id | workflow_runs(id) | CASCADE |
-| webhook_deliveries | endpoint_id | webhook_endpoints(id) | CASCADE |
-| events | contact_id | contacts(id) | SET NULL |
-| contacts | pipeline_id | pipelines(id) | SET NULL |
-| contacts | pipeline_stage_id | pipeline_stages(id) | SET NULL |
+### 2. Improve the Add Account form (src/pages/Accounts.tsx) to prevent recurrence
+- **Auto-fill Username from Email** as the user types in the Email field (only when Username is empty or still matches the previous email value). Most providers use the email as the username.
+- Add helper text under the Username field: *"Usually the same as your email address. Only change this if your provider uses a different IMAP/SMTP login (rare)."*
+- Add a small warning banner if `username` does not match `email` at save time, asking the user to confirm.
 
-The migration will:
-1. De-duplicate `contact_tags` and `contact_custom_values` rows defensively before adding the PKs (using `DISTINCT ON`).
-2. Null out any orphan `contact_id` / `pipeline_id` / etc. references defensively before adding FKs (so the migration can't fail mid-flight).
-3. Add the PK and FK constraints with `IF NOT EXISTS` patterns where supported (use `DO $$ ... EXCEPTION WHEN duplicate_object` for FKs).
+### 3. Defensive backend check (supabase/functions/inbox-sync/index.ts)
+- Optional: log a warning when `account.username` differs from `account.email` so future mismatches are easier to spot in edge function logs.
 
-### 2. Run E2E smoke test from Step 5 of the audit
+## Technical notes
 
-After the migration applies, I will execute the smoke-test SQL via the read/insert query tools using a real authenticated user_id (we have one already — taken from the most recent profile row). Sequence:
+- The IMAP sync logic itself is correct — it filters by `account_id` and stores messages under the right account. The bug is purely in the saved credentials, which made the sync log into the wrong mailbox.
+- No schema changes required; only a data fix and a UX tweak.
+- After the fix, clicking "Sync" on Dave's account will fetch the most recent ~50 messages from `dave@millionaze.net`'s actual inbox.
 
-1. Insert test contact, test tag, test workflow with `add_tag` action and trigger `email.opened`.
-2. Insert an `email.opened` event for that contact.
-3. Wait 70s (cron fires every minute, paired jobs effectively 30s).
-4. Verify: event `processing_status='processed'`, a `workflow_runs` row exists with `status='completed'`, the contact has the tag, and `workflow_run_log` has 2–3 rows.
-5. Clean up all test data.
+## What I need from you before applying the data fix
 
-If the smoke test fails, drop into edge-function logs for `workflow-event-processor` and `workflow-runner` to diagnose, then patch the function.
+The current saved password for Dave is `info@irfanics.com`'s password. Once we wipe Dave's bad messages and reset the username to `dave@millionaze.net`, you'll need to either:
+- Edit Dave's account and re-enter the correct password for `dave@millionaze.net`, or
+- Delete and re-create Dave from scratch (cleaner).
 
-### 3. Skip — already passing
-
-Steps 1–4, 6, and the merge-tag check (Step 7) either passed in the static audit or require a real SMTP send (the merge-tag resolver code exists in `_shared/merge-tags.ts` and is unit-coverable separately; I won't burn an actual email send during audit).
-
-### Deliverables
-
-- 1 new migration file: `add_workflow_engine_constraints.sql`
-- Smoke-test result summary posted in chat (event flowed, tag added, run completed) — or a list of failures with proposed fixes.
-
-After this passes, the backend is truly ready and we can move on to the UI work that's already partially built.
+Tell me which you prefer when you approve.
