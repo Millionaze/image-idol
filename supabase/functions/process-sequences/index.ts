@@ -1,5 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import {
+  sanitizeForSmtp,
+  sanitizeSubject,
+  htmlToText,
+  classifySmtpError,
+} from "../_shared/smtp-helpers.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,15 +71,18 @@ Deno.serve(async (req) => {
 
       try {
         const contactName = contact.name || contact.email.split("@")[0];
-        const subject = step.subject
+        const rawSubject = step.subject
           .replace(/\{\{name\}\}/g, contactName)
           .replace(/\{\{email\}\}/g, contact.email);
+        const subject = sanitizeSubject(rawSubject);
 
         const trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
         const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
-        const body = step.body
+        const rawBody = step.body
           .replace(/\{\{name\}\}/g, contactName)
           .replace(/\{\{email\}\}/g, contact.email) + trackingPixel;
+        const html = sanitizeForSmtp(rawBody);
+        const text = htmlToText(rawBody);
 
         const client = new SMTPClient({
           connection: {
@@ -88,11 +97,10 @@ Deno.serve(async (req) => {
           from: account.email,
           to: contact.email,
           subject,
-          content: "auto",
-          html: body,
+          content: text,
+          html,
         });
-        await client.close();
-
+        try { await client.close(); } catch { /* ignore */ }
         // Get next step
         const { data: nextStep } = await supabase
           .from("sequence_steps")
@@ -135,11 +143,21 @@ Deno.serve(async (req) => {
 
         processed++;
       } catch (e: any) {
-        console.error(`Sequence send failed for ${contact.email}:`, e.message);
-        await supabase.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
+        const classified = classifySmtpError(e);
+        console.error(`Sequence send for ${contact.email} [${classified.kind} code=${classified.code}]:`, classified.message);
+
+        if (classified.kind === "bounced") {
+          await supabase.from("contacts").update({ status: "bounced" }).eq("id", contact.id);
+        } else if (classified.kind === "failed") {
+          await supabase.from("contacts").update({ status: "failed" }).eq("id", contact.id);
+        }
+        // transient: leave contact as-is, sequence state will retry on next cron tick
+
         await supabase.from("events").insert({
-          user_id: campaign.user_id, contact_id: contact.id, event_type: "email.bounced",
-          source: { campaign_id: campaign.id, sequence_step_id: step.id }, payload: { error: e.message },
+          user_id: campaign.user_id, contact_id: contact.id,
+          event_type: classified.kind === "bounced" ? "email.bounced" : "email.failed",
+          source: { campaign_id: campaign.id, sequence_step_id: step.id },
+          payload: { error: classified.message, code: classified.code, kind: classified.kind },
         });
       }
     }
