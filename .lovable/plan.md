@@ -1,46 +1,53 @@
-# Why your emails are being marked "bounced"
+# Why DKIM shows red even though you configured it
 
-## What I found
+The Domain Health panel polls Google's public DNS for your DKIM record, but it only knows about a tiny hardcoded list of selectors:
 
-Looking at your `Agencies and Dentals` campaign (7 bounces, 0 sent) and the edge function logs:
+`google, default, mail, selector1, selector2, k1`
 
-1. **All 7 "bounced" contacts have `sent_at = null`** — meaning they never actually reached the recipient's mailserver. They were marked bounced before delivery.
-2. **The Edge Function log shows the real error:**
-   ```
-   552: Message contains bare LF and is violating 822.bis section 2.3
-   ```
-   This is an SMTP server rejection caused by **stray `\n` characters (without `\r\n`) in the email body** — typically from pasting content from a rich-text editor or AI-generated copy. Once that error fires, denomailer reports `connection not recoverable`, so **every subsequent contact in the same batch fails too** and gets marked `bounced`.
-3. **`send-campaign` treats every SMTP error as a bounce** — including auth failures, connection drops, malformed body, rate-limit, etc. A real "bounce" should only be a permanent recipient-side rejection (5xx on RCPT TO with codes like 550/551/553).
+A DKIM record lives at `<selector>._domainkey.<domain>`. If your provider uses a selector that isn't in that list, the checker can't find it — even though the record is published correctly. GoDaddy / Microsoft 365 / SecureServer mailboxes commonly use selectors like `s1`, `s2`, `protonmail`, `mxvault`, `dkim`, `smtpapi`, `zoho`, `everlytic`, and dozens of others, none of which we currently probe.
 
-So the 7 "bounces" are almost certainly **not bad email addresses** — they're one bad message body taking down the whole batch, plus mis-classification.
+So the red "DKIM ✗" badge on `millionaze.net` almost certainly means **"we couldn't guess your selector"**, not "DKIM is missing."
 
 ## Plan
 
-### 1. Sanitize the body before sending (fixes the 552 error)
-In `supabase/functions/send-campaign/index.ts` (and `process-sequences/index.ts`, `_shared/send-email-internal.ts` if they share the issue), normalize line endings on subject + body before passing to denomailer:
-- Replace lone `\n` and lone `\r` with proper `\r\n`
-- Strip null bytes and other control chars
-- Also add a `text` fallback (currently only `html` is set with `content: "auto"`)
+### 1. Expand the built-in selector list in `check-dns`
+Add the common ones used by every major provider:
+- `s1`, `s2` (GoDaddy/SecureServer, Namecheap)
+- `protonmail`, `protonmail2`, `protonmail3` (Proton)
+- `mxvault` (MXroute)
+- `zoho`, `zmail` (Zoho)
+- `dkim`, `dkim1`, `dkim2` (generic / Fastmail)
+- `mandrill`, `mailjet`, `smtpapi`, `sendgrid`, `scph0820`, `scph1020` (ESPs)
+- `key1`, `key2` (Mailgun)
+- `everlytic`, `pm`, `litmus`, `1`, `2`
+- `mta1`, `mta2` (Amazon SES style)
 
-### 2. Classify failures correctly (stop false bounces)
-Inspect the SMTP error code/message in the catch block and set status accordingly:
-- **`bounced`** — only for 550/551/553/554 with recipient-rejection wording ("user unknown", "no such user", "mailbox unavailable")
-- **`failed`** — for 552 (message rejected), 421/45x (transient), auth errors, connection errors, malformed body
-- Keep `pending` (with retry) for transient 4xx so the contact isn't burned
+This alone should auto-detect most users.
 
-This requires a new `failed` value on the `contact_status` enum (or reuse `pending` with a retry counter — I'll check the enum and pick the cleaner option).
+### 2. Let the user store a custom selector per domain
+Add an optional `dkim_selector` field on the account/domain record. If present, `check-dns` checks that selector **first** and trusts it.
 
-### 3. Stop the cascade after a connection-level failure
-When denomailer reports `connection not recoverable`, break out of the loop and re-open the SMTP client for the next batch instead of marking every remaining contact as bounced.
+UI change: in the DnsHealthPanel "How to fix" expander for DKIM, add a small input — "Already configured? Enter your DKIM selector" — that saves it and re-runs the check. So if your provider tells you the selector is e.g. `s1024`, you punch it in once and the badge turns green.
 
-### 4. Reset the 7 falsely-bounced contacts
-Update those 7 rows back to `pending` and decrement `bounce_count` on the campaign so you can re-send them after the fix ships.
+### 3. Surface the actual lookup attempt on failure
+When DKIM fails, return the list of selectors that were tried so the panel can say:
+> "Checked 18 common selectors at `*._domainkey.millionaze.net` — none returned a record. If you've configured DKIM, enter your selector below."
 
-### 5. Surface the real error to the UI
-Store the SMTP error message on the contact (or in `events.payload`, which already happens) and show it in the Campaign detail view so you can tell "bad address" apart from "bad message" next time.
+Much better UX than a silent red X.
+
+### 4. (Optional) Cache and reuse the discovered selector
+Once a selector resolves successfully for a domain, persist it on the account row so future checks skip the brute-force loop and are instant.
+
+## Files touched
+
+- `supabase/functions/check-dns/index.ts` — expand selector list, accept `selector` in request body, return `tried_selectors` on failure
+- `src/components/DnsHealthPanel.tsx` — custom-selector input in the DKIM "How to fix" panel, show tried selectors
+- One small migration to add `dkim_selector text` to the relevant accounts/domain table (only if you want step 2 + 4)
 
 ## Out of scope
-- DNS/SPF/DKIM issues — your other campaigns (Freight 1, Freight 35-48) sent successfully from the same `bizboostai.space` domain, so deliverability infra is fine.
-- Resend/Lovable Email — you're sending via your own SMTP (`mail.privateemail.com`, `smtpout.secureserver.net`), not a managed provider.
 
-Approve and I'll implement steps 1–5.
+- No change to the actual sending pipeline or warmup
+- No change to SPF/DMARC checks
+- No automated DKIM provisioning (still requires the record to exist at your DNS host)
+
+Want me to do all four steps, or just steps 1 + 3 (no schema change, just better detection + clearer error)?

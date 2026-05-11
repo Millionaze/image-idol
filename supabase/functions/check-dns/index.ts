@@ -28,23 +28,61 @@ function checkDmarc(answers: any[]): { found: boolean; record: string | null } {
   return { found: false, record: null };
 }
 
-async function checkDkim(domain: string): Promise<{ found: boolean; selector: string | null; record: string | null }> {
-  const selectors = ["google", "default", "mail", "selector1", "selector2", "k1"];
-  for (const sel of selectors) {
-    try {
-      const res = await queryDns(`${sel}._domainkey.${domain}`, "TXT");
-      if (res.Answer) {
-        for (const a of res.Answer) {
-          if (a.data && (a.data.includes("v=DKIM1") || a.data.includes("p="))) {
-            return { found: true, selector: sel, record: a.data };
-          }
+// Common DKIM selectors across major providers
+const DEFAULT_SELECTORS = [
+  // Generic / common
+  "default", "dkim", "dkim1", "dkim2", "mail", "email", "key1", "key2", "k1", "k2", "1", "2",
+  // Microsoft 365 / Exchange
+  "selector1", "selector2",
+  // GoDaddy / SecureServer / Namecheap PrivateEmail
+  "s1", "s2", "s1024", "s2048",
+  // Google Workspace
+  "google",
+  // Proton
+  "protonmail", "protonmail2", "protonmail3",
+  // Zoho
+  "zoho", "zmail",
+  // MXroute
+  "mxvault",
+  // Fastmail
+  "fm1", "fm2", "fm3",
+  // ESPs
+  "mandrill", "mailjet", "smtpapi", "sendgrid", "scph0820", "scph1020",
+  "pm", "pic", "litmus", "mta1", "mta2", "everlytic",
+];
+
+async function checkSelector(selector: string, domain: string) {
+  try {
+    const res = await queryDns(`${selector}._domainkey.${domain}`, "TXT");
+    if (res.Answer) {
+      for (const a of res.Answer) {
+        if (a.data && (a.data.includes("v=DKIM1") || a.data.includes("p="))) {
+          return { found: true, record: a.data as string };
         }
       }
-    } catch (_) {
-      // continue
     }
+  } catch (_) { /* ignore */ }
+  return { found: false, record: null as string | null };
+}
+
+async function checkDkim(
+  domain: string,
+  customSelector?: string | null,
+): Promise<{ found: boolean; selector: string | null; record: string | null; tried: string[] }> {
+  const tried: string[] = [];
+  // Try user-provided selector first
+  if (customSelector) {
+    tried.push(customSelector);
+    const r = await checkSelector(customSelector, domain);
+    if (r.found) return { found: true, selector: customSelector, record: r.record, tried };
   }
-  return { found: false, selector: null, record: null };
+  for (const sel of DEFAULT_SELECTORS) {
+    if (sel === customSelector) continue;
+    tried.push(sel);
+    const r = await checkSelector(sel, domain);
+    if (r.found) return { found: true, selector: sel, record: r.record, tried };
+  }
+  return { found: false, selector: null, record: null, tried };
 }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -55,7 +93,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { domain } = await req.json();
+    const { domain, selector } = await req.json();
     if (!domain) {
       return new Response(JSON.stringify({ error: "domain required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -63,7 +101,7 @@ Deno.serve(async (req) => {
     const [spfRes, dmarcRes, dkimRes] = await Promise.all([
       queryDns(domain, "TXT"),
       queryDns(`_dmarc.${domain}`, "TXT"),
-      checkDkim(domain),
+      checkDkim(domain, selector ?? null),
     ]);
 
     const spf = checkSpf(spfRes.Answer);
@@ -75,6 +113,7 @@ Deno.serve(async (req) => {
       dkim: dkimRes.found,
       dkim_selector: dkimRes.selector,
       dkim_record: dkimRes.record,
+      dkim_tried_selectors: dkimRes.tried,
       dmarc: dmarc.found,
       dmarc_record: dmarc.record,
       score: (spf.found ? 1 : 0) + (dkimRes.found ? 1 : 0) + (dmarc.found ? 1 : 0),
