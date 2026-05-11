@@ -145,8 +145,8 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      <div className="grid grid-cols-1 gap-6">
+        <Card>
           <CardHeader>
             <CardTitle className="text-base">7-Day Warmup Activity</CardTitle>
           </CardHeader>
@@ -181,26 +181,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Recent Warmup</CardTitle>
-          </CardHeader>
-          <CardContent className="max-h-[280px] overflow-auto space-y-3">
-            {warmupLogs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No warmup activity yet — enable warmup on 2+ accounts</p>
-            ) : (
-              warmupLogs.map((log) => (
-                <div key={log.id} className="flex items-center justify-between text-sm">
-                  <div>
-                    <span className="text-muted-foreground">{log.type === "sent" ? "→" : "←"}</span>{" "}
-                    <span>{log.partner_email || "unknown"}</span>
-                  </div>
-                  <StatusBadge status={log.status} />
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       <Card>
