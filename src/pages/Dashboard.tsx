@@ -14,7 +14,7 @@ export default function Dashboard() {
   const { toast } = useToast();
   const [stats, setStats] = useState({ accounts: 0, warmupSent: 0, campaigns: 0, avgReputation: 0 });
   const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [warmupLogs, setWarmupLogs] = useState<any[]>([]);
+  
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [weakestAccount, setWeakestAccount] = useState<any>(null);
@@ -23,10 +23,9 @@ export default function Dashboard() {
     if (!user) return;
     const load = async () => {
       try {
-        const [accountsRes, campaignsRes, logsRes] = await Promise.all([
+        const [accountsRes, campaignsRes] = await Promise.all([
           supabase.from("email_accounts").select("*"),
           supabase.from("campaigns").select("*").order("created_at", { ascending: false }).limit(10),
-          supabase.from("warmup_logs").select("*, email_accounts(email)").order("created_at", { ascending: false }).limit(20),
         ]);
 
         const accounts = accountsRes.data || [];
@@ -40,7 +39,6 @@ export default function Dashboard() {
           avgReputation: avgRep,
         });
         setCampaigns(campaignsRes.data || []);
-        setWarmupLogs(logsRes.data || []);
 
         // Find weakest account (lowest reputation)
         if (accounts.length > 0) {
