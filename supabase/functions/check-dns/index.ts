@@ -36,6 +36,8 @@ const DEFAULT_SELECTORS = [
   "selector1", "selector2",
   // GoDaddy / SecureServer / Namecheap PrivateEmail
   "s1", "s2", "s1024", "s2048",
+  // GoDaddy Titan Email / Titan
+  "secureserver1", "secureserver2", "titanmail",
   // Google Workspace
   "google",
   // Proton
