@@ -143,7 +143,7 @@ export default function Unibox() {
   // Auto-sync every 2 minutes
   useEffect(() => {
     if (!accounts.length) return;
-    const interval = setInterval(() => syncAll(true), 2 * 60 * 1000);
+    const interval = setInterval(() => syncAll(true), 10 * 60 * 1000);
     return () => clearInterval(interval);
   }, [accounts, syncAll]);
 

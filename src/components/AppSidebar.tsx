@@ -60,7 +60,7 @@ export function AppSidebar() {
       } catch { /* silent */ }
     };
     loadUnread();
-    const interval = setInterval(loadUnread, 30000);
+    const interval = setInterval(loadUnread, 120000);
     return () => clearInterval(interval);
   }, []);
 
