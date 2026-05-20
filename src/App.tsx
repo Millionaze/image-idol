@@ -27,6 +27,7 @@ import Spintax from "@/pages/tools/Spintax";
 import WorkflowsDebug from "@/pages/admin/WorkflowsDebug";
 import Workflows from "@/pages/Workflows";
 import Pipeline from "@/pages/Pipeline";
+import ApiDocs from "@/pages/ApiDocs";
 
 const queryClient = new QueryClient();
 
