@@ -27,6 +27,7 @@ import Spintax from "@/pages/tools/Spintax";
 import WorkflowsDebug from "@/pages/admin/WorkflowsDebug";
 import Workflows from "@/pages/Workflows";
 import Pipeline from "@/pages/Pipeline";
+import ApiDocs from "@/pages/ApiDocs";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +54,7 @@ const App = () => (
               <Route path="/workflows/:id" element={<Workflows />} />
               <Route path="/pipeline" element={<Pipeline />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/api-docs" element={<ApiDocs />} />
               <Route path="/tools/list-cleaner" element={<ListCleaner />} />
               <Route path="/tools/copy-writer" element={<CopyWriter />} />
               <Route path="/tools/subject-tester" element={<SubjectTester />} />

@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TagManager } from "@/components/settings/TagManager";
 import { CustomFieldManager } from "@/components/settings/CustomFieldManager";
+import { ApiKeysPanel } from "@/components/settings/ApiKeysPanel";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -185,6 +186,7 @@ export default function Settings() {
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="tags">Tags</TabsTrigger>
           <TabsTrigger value="fields">Custom Fields</TabsTrigger>
+          <TabsTrigger value="api">API</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-6 mt-4">
@@ -335,6 +337,7 @@ export default function Settings() {
 
         <TabsContent value="tags" className="mt-4"><TagManager /></TabsContent>
         <TabsContent value="fields" className="mt-4"><CustomFieldManager /></TabsContent>
+        <TabsContent value="api" className="mt-4"><ApiKeysPanel /></TabsContent>
       </Tabs>
     </div>
   );
