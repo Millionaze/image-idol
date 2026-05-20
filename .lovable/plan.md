@@ -1,76 +1,72 @@
-## Plan: Fix DB resource exhaustion
+# Public API for Campaigns & Sending
 
-The `pg_sleep` (1.3 billion ms) and 107k `net.http_post` calls trace to **4 cron jobs running every 30s** (two of which do `pg_sleep(30)` to fake sub-minute scheduling) plus aggressive frontend polling.
+Add a minimal, documented REST API so external systems can programmatically create campaigns (bound to warmed-up email accounts) and send emails — authenticated by per-user API keys.
 
-### Diagnosis
+## Scope
 
-**pg_cron (`select * from cron.job`):**
+In:
+- API key issuance & revocation (UI in Settings)
+- One public edge function exposing 4 endpoints
+- Docs page with curl examples
 
-| jobid | name | schedule | command |
-|-------|------|----------|---------|
-| 7 | workflow-event-processor-30s-a | `* * * * *` | http_post |
-| 8 | workflow-event-processor-30s-b | `* * * * *` | `pg_sleep(30)` + http_post |
-| 9 | workflow-runner-30s-a | `* * * * *` | http_post |
-| 10 | workflow-runner-30s-b | `* * * * *` | `pg_sleep(30)` + http_post |
-| 4 | warmup-rescue | `*/5 * * * *` | http_post |
-| 3 | warmup-cycle | `*/15 * * * *` | http_post |
+Out (can come later):
+- Webhooks for delivery events (already exists separately)
+- Per-key rate limiting beyond a simple per-minute counter
+- OAuth, granular scopes
 
-That's **4 hits/min** to edge functions plus **2 long-held connections/min holding pg_sleep(30)** — the dominant cost.
+## Database
 
-**Frontend polling:**
-- `src/pages/Unibox.tsx:146` — `syncAll` every 2 min
-- `src/components/AppSidebar.tsx:63` — unread count every 30 s
+New table `api_keys`:
+- `id`, `user_id`, `name` (label like "Zapier"), `key_prefix` (e.g. `pg_live_abc12345` — shown in UI), `key_hash` (sha256 of full key, only thing stored), `last_used_at`, `revoked_at`, `created_at`
+- RLS: users manage only their own rows
+- Full key shown **once** at creation time, then never again
 
-### Fix (data-only, no schema migration)
+## Edge Function: `public-api` (verify_jwt = false)
 
-**1. Cron — drop "b" jobs and slow "a" jobs to every 2 min** (insert tool, since these are data ops on `cron.job`):
+Path-based router. Auth via `Authorization: Bearer pg_live_...` → hash → lookup in `api_keys` → resolve `user_id` → use service role scoped to that user.
 
-```sql
-select cron.unschedule('workflow-event-processor-30s-b');
-select cron.unschedule('workflow-runner-30s-b');
-select cron.alter_job((select jobid from cron.job where jobname='workflow-event-processor-30s-a'),
-                     schedule := '*/2 * * * *');
-select cron.alter_job((select jobid from cron.job where jobname='workflow-runner-30s-a'),
-                     schedule := '*/2 * * * *');
-```
+Endpoints:
 
-Result: pg_sleep(30) eliminated, http_posts drop from ~115k/day → ~1.5k/day for these two crons.
+1. **`GET /v1/accounts`**
+   List user's email accounts with `id`, `email`, `warmup_enabled`, `reputation_score`, `status`. Lets the caller pick a warmed-up sender.
 
-**2. Add a daily purge job** for `cron.job_run_details` and `net._http_response` (currently grow forever, ~500k writes in the sample):
+2. **`POST /v1/campaigns`**
+   Body: `{ name, account_id, subject, body, daily_limit?, sequences?: [{ step_number, subject, body, delay_days }] }`
+   Validates `account_id` belongs to user and ideally has `warmup_enabled = true` and `reputation_score >= 50` (warning, not block — configurable). Returns campaign `id`.
 
-```sql
-select cron.schedule('purge-cron-net-history', '15 3 * * *', $$
-  delete from cron.job_run_details where end_time < now() - interval '3 days';
-  delete from net._http_response where created < now() - interval '1 day';
-$$);
-```
+3. **`POST /v1/campaigns/:id/contacts`**
+   Body: `{ contacts: [{ email, name? }] }` (max 1000 per call). Bulk insert into `contacts` table.
 
-**3. Frontend polling tweaks:**
-- `src/pages/Unibox.tsx`: bump `2 * 60 * 1000` → `10 * 60 * 1000` (10 min)
-- `src/components/AppSidebar.tsx`: bump `30000` → `120000` (2 min)
+4. **`POST /v1/campaigns/:id/launch`**
+   Flips status `draft → active` and invokes the existing `send-campaign` / `process-sequences` machinery — no duplication of sending logic.
 
-**4. Indexes** (schema migration — separate `supabase--migration` call) on the hot polling queries:
+5. **`POST /v1/emails/send`** (one-off, no campaign)
+   Body: `{ account_id, to, subject, html }`. Calls existing `sendEmailViaAccount` helper. Useful for transactional sends from a warmed-up inbox.
 
-```sql
-create index if not exists idx_inbox_messages_unread_real
-  on inbox_messages (account_id, received_at desc)
-  where is_read = false and is_warmup = false;
+All responses JSON; errors `{ error: { code, message } }`; consistent 400 / 401 / 404 / 429.
 
-create index if not exists idx_events_pending
-  on events (occurred_at)
-  where processing_status = 'pending';
+## Rate limiting (simple)
 
-create index if not exists idx_email_accounts_warmup_active
-  on email_accounts (id)
-  where warmup_enabled = true and imap_host is not null;
-```
+In-memory map keyed by `key_id` → 60 req/min. Returns 429 with `Retry-After`. Good enough for v1; can upgrade to a DB counter later.
 
-### Expected impact
-- ~95% reduction in `net.http_post` calls
-- pg_sleep load → ~0
-- Unibox query (#3 in your top list) drops from 29k → ~6k calls/window
-- Memory pressure from `cron.job_run_details` bloat removed
+## Frontend
 
-### Out of scope
-- Compute upgrade (revisit only if still tight after this)
-- Refactoring workflow-runner into a queue worker (bigger architectural change)
+- **Settings → API Keys** tab: list keys (name, prefix, last used), "Create key" button → modal shows full key once with copy button, "Revoke" action.
+- **Settings → API Docs** subpage (or `/api-docs`): curl examples for each endpoint, base URL `https://ivyqkprlrosapkmmwkeh.supabase.co/functions/v1/public-api`.
+
+## Technical notes
+
+- Key format: `pg_live_` + 32 hex chars. Store only `sha256(fullKey)` in `key_hash`.
+- Update `last_used_at` async (don't block request).
+- Add `public-api` to `supabase/config.toml` with `verify_jwt = false`.
+- Reuse `supabase/functions/_shared/send-email-internal.ts` for the one-off send endpoint.
+- Launch endpoint reuses existing `send-campaign` invocation pattern (no logic duplication).
+
+## Deliverables
+
+1. Migration: `api_keys` table + RLS
+2. Edge function: `supabase/functions/public-api/index.ts` + config.toml entry
+3. UI: `src/components/settings/ApiKeysPanel.tsx` mounted in Settings
+4. Docs page: `src/pages/ApiDocs.tsx` with copy-able curl snippets
+
+Approve and I'll build it.
