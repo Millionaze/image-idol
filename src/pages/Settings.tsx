@@ -337,6 +337,7 @@ export default function Settings() {
 
         <TabsContent value="tags" className="mt-4"><TagManager /></TabsContent>
         <TabsContent value="fields" className="mt-4"><CustomFieldManager /></TabsContent>
+        <TabsContent value="api" className="mt-4"><ApiKeysPanel /></TabsContent>
       </Tabs>
     </div>
   );
