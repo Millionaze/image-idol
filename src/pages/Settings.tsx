@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TagManager } from "@/components/settings/TagManager";
 import { CustomFieldManager } from "@/components/settings/CustomFieldManager";
+import { ApiKeysPanel } from "@/components/settings/ApiKeysPanel";
 
 export default function Settings() {
   const { user } = useAuth();
