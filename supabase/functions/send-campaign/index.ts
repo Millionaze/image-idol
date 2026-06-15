@@ -115,12 +115,11 @@ Deno.serve(async (req) => {
       console.error("Failed to load tracking domain settings:", e);
     }
 
-    const useImplicitTls = account.smtp_port === 465;
     const client = new SMTPClient({
       connection: {
         hostname: account.smtp_host,
         port: account.smtp_port,
-        tls: useImplicitTls,
+        tls: account.smtp_secure,
         auth: { username: account.username, password: account.password },
       },
     });
