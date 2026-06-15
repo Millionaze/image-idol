@@ -344,7 +344,22 @@ export default function Accounts() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2"><Label>SMTP Host</Label><Input value={form.smtp_host} onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))} /></div>
-                  <div className="space-y-2"><Label>SMTP Port</Label><Input type="number" value={form.smtp_port} onChange={(e) => setForm((f) => ({ ...f, smtp_port: parseInt(e.target.value) }))} /></div>
+                  <div className="space-y-2">
+                    <Label>SMTP Port</Label>
+                    <Input
+                      type="number"
+                      value={form.smtp_port}
+                      onChange={(e) => {
+                        const port = parseInt(e.target.value);
+                        setForm((f) => ({
+                          ...f,
+                          smtp_port: port,
+                          smtp_secure: port === 465 ? true : port === 587 ? false : f.smtp_secure,
+                        }));
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">Port 587 uses STARTTLS. Port 465 uses implicit TLS.</p>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2"><Label>IMAP Host</Label><Input value={form.imap_host} onChange={(e) => setForm((f) => ({ ...f, imap_host: e.target.value }))} /></div>
@@ -528,7 +543,22 @@ export default function Accounts() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label>SMTP Host</Label><Input value={editForm.smtp_host} onChange={(e) => setEditForm((f) => ({ ...f, smtp_host: e.target.value }))} /></div>
-              <div className="space-y-2"><Label>SMTP Port</Label><Input type="number" value={editForm.smtp_port} onChange={(e) => setEditForm((f) => ({ ...f, smtp_port: parseInt(e.target.value) }))} /></div>
+              <div className="space-y-2">
+                <Label>SMTP Port</Label>
+                <Input
+                  type="number"
+                  value={editForm.smtp_port}
+                  onChange={(e) => {
+                    const port = parseInt(e.target.value);
+                    setEditForm((f) => ({
+                      ...f,
+                      smtp_port: port,
+                      smtp_secure: port === 465 ? true : port === 587 ? false : f.smtp_secure,
+                    }));
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">Port 587 uses STARTTLS. Port 465 uses implicit TLS.</p>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label>IMAP Host</Label><Input value={editForm.imap_host} onChange={(e) => setEditForm((f) => ({ ...f, imap_host: e.target.value }))} /></div>

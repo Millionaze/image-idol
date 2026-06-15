@@ -69,7 +69,9 @@ export function classifySmtpError(err: unknown): ClassifiedSmtpError {
     lower.includes("error while in datamode") ||
     lower.includes("connection closed") ||
     lower.includes("connection reset") ||
-    lower.includes("broken pipe");
+    lower.includes("broken pipe") ||
+    lower.includes("invalidcontenttype") ||
+    lower.includes("corrupt message");
 
   // Real recipient-side bounces
   const bounceCodes = new Set([550, 551, 553, 554]);
