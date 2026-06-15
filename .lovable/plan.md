@@ -1,49 +1,31 @@
-## Problem
+## What the screenshot tells us
 
-A new user is trying to connect a GoDaddy mailbox (`secureserver.net`) on port **465** with TLS, and the SMTP test fails. Edge function logs confirm it:
+The error displayed is:
 
-```
-SMTP test error: Connection reset by peer (os error 104)
-```
+> Connection failed: Connection reset by peer (os error 104)
 
-The TCP socket is reset during the TLS handshake on port 465. The account never reaches the DB because `saveAccount()` only inserts after `smtp-test` returns success.
+That exact wording comes from the **previous** version of `supabase/functions/smtp-test/index.ts` (the old `catch` returned `` `Connection failed: ${connError.message}` ``). The new code I shipped last turn:
 
-## Likely causes (all common for GoDaddy)
+- Returns classified messages like *"Your provider reset the connection on port 465. This is common with GoDaddy on port 465 from cloud IPs..."*
+- Automatically retries on **587 + STARTTLS** when 465 is reset, and if the retry succeeds, prompts the UI to save with those settings.
 
-1. **Wrong host.** GoDaddy users often enter `smtp.secureserver.net`, `relay-hosting.secureserver.net`, or their domain — the correct hosts are `smtpout.secureserver.net` (legacy Workspace Email) or `smtp.office365.com` (if the mailbox is GoDaddy-resold Microsoft 365).
-2. **Port 465 blocked / rate-limited from Supabase edge IPs.** GoDaddy is known to reset port 465 from datacenter IP ranges. Port **587 with STARTTLS** usually succeeds where 465 fails. Alternates: 80, 3535.
-3. **Mailbox is actually Microsoft 365.** Implicit TLS to `secureserver.net` will never work because the user picked the wrong server.
+Since the user is still seeing the old message, the new `smtp-test` Edge Function either didn't redeploy or the user's browser hit it before the new version went live.
 
-Right now we surface a raw `Connection reset by peer (os error 104)` with no guidance, so the user has nothing to act on.
+## Account-specific note
 
-## Fix — 2 changes, frontend + edge function only
+`mike@getpluggednetwork.com` on `smtpout.secureserver.net:465` is the classic GoDaddy-from-cloud-IP block. Port **587 with STARTTLS** is almost always the fix for this combination — exactly what the new fallback handles automatically.
 
-### 1. `supabase/functions/smtp-test/index.ts` — auto-retry + actionable errors
+## Plan
 
-When the initial connect fails with ECONNRESET/timeout (or the TLS handshake throws on port 465):
-
-- If the failing port was **465**, automatically retry once on **587** with STARTTLS using the same credentials. If the retry succeeds, return `{ success: true, suggestedPort: 587, suggestedSecure: false }` so the UI can prompt the user to switch.
-- If both fail, classify the error and return a human-readable `error` plus an `errorCode`:
-  - `connection_reset` / `connection_timeout` → "Your provider reset the connection on port {port}. This is common with GoDaddy on 465 from cloud IPs — try port 587 with TLS off (STARTTLS will be used automatically)."
-  - `unknown_host` → "Hostname not found. For GoDaddy Workspace Email use `smtpout.secureserver.net`; for GoDaddy-resold Microsoft 365 use `smtp.office365.com`."
-  - `auth_failed` → unchanged.
-
-No change to the success path or DB write order.
-
-### 2. `src/pages/Accounts.tsx` — surface the suggestion
-
-- When `smtp-test` returns `suggestedPort`/`suggestedSecure`, show a toast/confirm: "Connected on port 587 instead of 465. Save with the working settings?" — if accepted, patch `form` and proceed to insert.
-- When the error includes provider-specific guidance, render it in `smtpError` exactly as returned (the field already supports any string).
-- Add a small inline hint below the SMTP Host input for `secureserver.net` hosts: "GoDaddy: use smtpout.secureserver.net + port 587 (TLS off → STARTTLS). If your mailbox was migrated to Microsoft 365, use smtp.office365.com + 587."
+1. **Force-redeploy `smtp-test`.** Touch the file (a trivial comment edit) so Lovable picks up a new deploy, then verify via `edge_function_logs` that a new boot timestamp appears.
+2. **No code logic changes** — last turn's implementation is correct. This is purely a redeploy/verification step.
+3. **Ask the user to retry** after redeploy. Expected outcomes:
+   - The function silently tries 465, fails with reset, retries 587+STARTTLS, succeeds, and the UI shows a confirm prompt: *"Port 465 was reset by smtpout.secureserver.net, but port 587 with STARTTLS worked. Save with these settings instead?"* → user clicks OK → account is saved.
+   - Or, if 587 also fails, they see the new actionable error (specific GoDaddy guidance), not the raw `os error 104`.
+4. **Immediate workaround** the user can do right now without waiting: change SMTP Port from `465` to `587` and toggle **Use TLS/SSL off**, then click Connect Account. That bypasses the 465 problem and uses STARTTLS, which GoDaddy reliably accepts.
 
 ## Out of scope
 
-- No DB schema changes.
-- No changes to `send-campaign`, `process-sequences`, `warmup-run`, or `_shared/send-email-internal.ts` — they keep using `smtp_secure` as the TLS source of truth.
-- IMAP settings untouched.
-
-## Verification
-
-1. Ask the user for the exact host they entered (likely the wrong one) and confirm with `smtpout.secureserver.net`.
-2. Re-test from the UI — expect either success on 465, or auto-fallback success on 587, or a clear actionable error explaining what to change.
-3. New row appears in `email_accounts` for the new user.
+- No DB changes.
+- No changes to send-campaign / process-sequences / warmup-run.
+- IMAP settings (`imap.secureserver.net:993`) look correct — untouched.
