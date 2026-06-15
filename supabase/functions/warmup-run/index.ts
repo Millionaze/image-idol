@@ -173,11 +173,10 @@ Deno.serve(async (req) => {
           }
 
           // Send the reply via SMTP
-          const replierUseImplicitTls = replier.smtp_port === 465;
           const client = new SMTPClient({
             connection: {
               hostname: replier.smtp_host, port: replier.smtp_port,
-              tls: replierUseImplicitTls,
+              tls: replier.smtp_secure,
               auth: { username: replier.username, password: replier.password },
             },
           });
@@ -432,11 +431,10 @@ Deno.serve(async (req) => {
       }
 
       try {
-        const senderUseImplicitTls = sender.smtp_port === 465;
         const client = new SMTPClient({
           connection: {
             hostname: sender.smtp_host, port: sender.smtp_port,
-            tls: senderUseImplicitTls,
+            tls: sender.smtp_secure,
             auth: { username: sender.username, password: sender.password },
           },
         });

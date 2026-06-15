@@ -84,12 +84,11 @@ Deno.serve(async (req) => {
         const html = sanitizeForSmtp(rawBody);
         const text = htmlToText(rawBody);
 
-        const useImplicitTls = account.smtp_port === 465;
         const client = new SMTPClient({
           connection: {
             hostname: account.smtp_host,
             port: account.smtp_port,
-            tls: useImplicitTls,
+            tls: account.smtp_secure,
             auth: { username: account.username, password: account.password },
           },
         });
