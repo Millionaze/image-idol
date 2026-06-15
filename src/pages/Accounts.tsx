@@ -217,6 +217,7 @@ export default function Accounts() {
 
     setSmtpError(null);
     setTesting(true);
+    let finalForm = form;
     try {
       const { data, error } = await supabase.functions.invoke("smtp-test", {
         body: { smtp_host: form.smtp_host, smtp_port: form.smtp_port, smtp_secure: form.smtp_secure, username: form.username, password: form.password },
@@ -227,6 +228,19 @@ export default function Accounts() {
         setTesting(false);
         return;
       }
+      // Auto-fallback suggestion from edge function (e.g. 465 reset → 587 STARTTLS worked)
+      if (data.suggestedPort && (data.suggestedPort !== form.smtp_port || data.suggestedSecure !== form.smtp_secure)) {
+        const ok = window.confirm(
+          (data.note || `Port ${form.smtp_port} failed but port ${data.suggestedPort} worked.`) +
+          `\n\nSave the account with port ${data.suggestedPort} (TLS ${data.suggestedSecure ? "on" : "off / STARTTLS"})?`
+        );
+        if (!ok) {
+          setTesting(false);
+          return;
+        }
+        finalForm = { ...form, smtp_port: data.suggestedPort, smtp_secure: !!data.suggestedSecure };
+        setForm(finalForm);
+      }
     } catch (e: any) {
       setSmtpError(e.message || "Could not test SMTP connection");
       setTesting(false);
@@ -236,7 +250,7 @@ export default function Accounts() {
 
     setSaving(true);
     try {
-      const { error } = await supabase.from("email_accounts").insert({ user_id: user.id, ...form });
+      const { error } = await supabase.from("email_accounts").insert({ user_id: user.id, ...finalForm });
       if (error) throw error;
       toast({ title: "Account added" });
       setForm(emptyForm);
