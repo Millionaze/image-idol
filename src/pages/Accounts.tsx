@@ -357,7 +357,15 @@ export default function Accounts() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2"><Label>SMTP Host</Label><Input value={form.smtp_host} onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))} /></div>
+                  <div className="space-y-2">
+                    <Label>SMTP Host</Label>
+                    <Input value={form.smtp_host} onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))} />
+                    {/secureserver\.net/i.test(form.smtp_host) && (
+                      <p className="text-xs text-muted-foreground">
+                        GoDaddy: use <code>smtpout.secureserver.net</code> on port 587 (TLS off → STARTTLS). If migrated to Microsoft 365, use <code>smtp.office365.com</code> on 587.
+                      </p>
+                    )}
+                  </div>
                   <div className="space-y-2">
                     <Label>SMTP Port</Label>
                     <Input
