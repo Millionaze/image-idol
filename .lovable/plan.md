@@ -1,72 +1,73 @@
-# Public API for Campaigns & Sending
 
-Add a minimal, documented REST API so external systems can programmatically create campaigns (bound to warmed-up email accounts) and send emails — authenticated by per-user API keys.
+# Fix: Brevo SMTP TLS mismatch — 4 changes, scoped exactly as requested
 
-## Scope
+No UI/logic touched outside the items below.
 
-In:
-- API key issuance & revocation (UI in Settings)
-- One public edge function exposing 4 endpoints
-- Docs page with curl examples
+---
 
-Out (can come later):
-- Webhooks for delivery events (already exists separately)
-- Per-key rate limiting beyond a simple per-minute counter
-- OAuth, granular scopes
+## Change 1 — DB data fix (insert tool, not migration)
 
-## Database
+Run via the data-update tool:
 
-New table `api_keys`:
-- `id`, `user_id`, `name` (label like "Zapier"), `key_prefix` (e.g. `pg_live_abc12345` — shown in UI), `key_hash` (sha256 of full key, only thing stored), `last_used_at`, `revoked_at`, `created_at`
-- RLS: users manage only their own rows
-- Full key shown **once** at creation time, then never again
+```sql
+UPDATE email_accounts
+SET smtp_secure = false
+WHERE smtp_host = 'smtp-relay.brevo.com'
+  AND smtp_port = 587;
+```
 
-## Edge Function: `public-api` (verify_jwt = false)
+Affects the two existing accounts (`dave@millionaze.net`, `info@millionaze.net`).
 
-Path-based router. Auth via `Authorization: Bearer pg_live_...` → hash → lookup in `api_keys` → resolve `user_id` → use service role scoped to that user.
+## Change 2 — Port-aware TLS in all sending paths
 
-Endpoints:
+Replace the `SMTPClient` init block in:
 
-1. **`GET /v1/accounts`**
-   List user's email accounts with `id`, `email`, `warmup_enabled`, `reputation_score`, `status`. Lets the caller pick a warmed-up sender.
+- `supabase/functions/send-campaign/index.ts` (~line 118)
+- `supabase/functions/process-sequences/index.ts` (~line 87)
+- `supabase/functions/_shared/send-email-internal.ts` (~line 51)
+- `supabase/functions/warmup-run/index.ts` (~lines 176 and 434)
 
-2. **`POST /v1/campaigns`**
-   Body: `{ name, account_id, subject, body, daily_limit?, sequences?: [{ step_number, subject, body, delay_days }] }`
-   Validates `account_id` belongs to user and ideally has `warmup_enabled = true` and `reputation_score >= 50` (warning, not block — configurable). Returns campaign `id`.
+From `tls: account.smtp_secure` to:
 
-3. **`POST /v1/campaigns/:id/contacts`**
-   Body: `{ contacts: [{ email, name? }] }` (max 1000 per call). Bulk insert into `contacts` table.
+```ts
+const useImplicitTls = account.smtp_port === 465;
+const client = new SMTPClient({
+  connection: {
+    hostname: account.smtp_host,
+    port:     account.smtp_port,
+    tls:      useImplicitTls,
+    auth: { username: account.username, password: account.password },
+  },
+});
+```
 
-4. **`POST /v1/campaigns/:id/launch`**
-   Flips status `draft → active` and invokes the existing `send-campaign` / `process-sequences` machinery — no duplication of sending logic.
+(For `warmup-run` the two call sites use variables `replier`/`sender` instead of `account` — same pattern, swapped name.)
 
-5. **`POST /v1/emails/send`** (one-off, no campaign)
-   Body: `{ account_id, to, subject, html }`. Calls existing `sendEmailViaAccount` helper. Useful for transactional sends from a warmed-up inbox.
+## Change 3 — Classifier recognises TLS handshake failure as fatal
 
-All responses JSON; errors `{ error: { code, message } }`; consistent 400 / 401 / 404 / 429.
+In `supabase/functions/_shared/smtp-helpers.ts`, extend the `connectionFatal` detection in `classifySmtpError` to also match:
 
-## Rate limiting (simple)
+- `invalidcontenttype`
+- `corrupt message`
 
-In-memory map keyed by `key_id` → 60 req/min. Returns 429 with `Retry-After`. Good enough for v1; can upgrade to a DB counter later.
+So one TLS-handshake failure breaks the batch instead of burning every contact.
 
-## Frontend
+## Change 4 — UI guard in the SMTP form
 
-- **Settings → API Keys** tab: list keys (name, prefix, last used), "Create key" button → modal shows full key once with copy button, "Revoke" action.
-- **Settings → API Docs** subpage (or `/api-docs`): curl examples for each endpoint, base URL `https://ivyqkprlrosapkmmwkeh.supabase.co/functions/v1/public-api`.
+In `src/pages/Accounts.tsx` (add form around L346 and edit form around L530):
 
-## Technical notes
+- When the user changes `smtp_port` to `587` → auto-set `smtp_secure = false`.
+- When they change it to `465` → auto-set `smtp_secure = true`.
+- Add a small muted helper line under the port input:
+  *"Port 587 uses STARTTLS. Port 465 uses implicit TLS."*
 
-- Key format: `pg_live_` + 32 hex chars. Store only `sha256(fullKey)` in `key_hash`.
-- Update `last_used_at` async (don't block request).
-- Add `public-api` to `supabase/config.toml` with `verify_jwt = false`.
-- Reuse `supabase/functions/_shared/send-email-internal.ts` for the one-off send endpoint.
-- Launch endpoint reuses existing `send-campaign` invocation pattern (no logic duplication).
+The TLS toggle stays editable for non-standard ports.
 
-## Deliverables
+---
 
-1. Migration: `api_keys` table + RLS
-2. Edge function: `supabase/functions/public-api/index.ts` + config.toml entry
-3. UI: `src/components/settings/ApiKeysPanel.tsx` mounted in Settings
-4. Docs page: `src/pages/ApiDocs.tsx` with copy-able curl snippets
+## Out of scope (per your instruction)
 
-Approve and I'll build it.
+- No changes to retry logic, dashboards, or any other feature.
+- No env-var changes; SMTP creds remain per-row in `email_accounts`.
+
+Approve and I'll apply all four in one pass.
