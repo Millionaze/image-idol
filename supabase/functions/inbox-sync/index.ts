@@ -582,13 +582,16 @@ Deno.serve(async (req) => {
     console.error("inbox-sync error:", error);
     const msg = String(error?.message || error);
     const isAuth = /AUTHENTICATIONFAILED|Authentication failed|LOGIN failed|Invalid credentials/i.test(msg);
+    // Return 200 with success:false so supabase.functions.invoke doesn't throw
+    // and the UI can render the error inline instead of blank-screening.
     return new Response(JSON.stringify({
+      success: false,
       error: isAuth
         ? "IMAP authentication failed. Update credentials in Accounts → Edit."
         : msg,
       code: isAuth ? "imap_auth_failed" : "imap_error",
     }), {
-      status: isAuth ? 401 : 500,
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
