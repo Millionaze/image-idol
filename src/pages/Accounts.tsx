@@ -419,19 +419,44 @@ export default function Accounts() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Username</Label>
+                    <Label>SMTP Username</Label>
                     <Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} />
                     <p className="text-xs text-muted-foreground">
-                      Usually the same as your email. Only change this if your provider uses a different IMAP/SMTP login (rare).
+                      Usually the same as your email. Providers like Brevo use a separate SMTP login.
                     </p>
-                    {form.username && form.email && form.username.trim().toLowerCase() !== form.email.trim().toLowerCase() && (
+                    {!form.imap_split && form.username && form.email && form.username.trim().toLowerCase() !== form.email.trim().toLowerCase() && (
                       <p className="text-xs text-destructive">
-                        ⚠ Username does not match Email — you'll sync the "{form.username}" mailbox, not "{form.email}".
+                        ⚠ Username does not match Email — if your IMAP server uses your email instead, enable "IMAP uses different credentials" below.
                       </p>
                     )}
                   </div>
-                  <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
+                  <div className="space-y-2"><Label>SMTP Password</Label><Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
                 </div>
+                <div className="flex items-center gap-2 pt-2 border-t border-border/50">
+                  <Switch
+                    checked={form.imap_split}
+                    onCheckedChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        imap_split: v,
+                        imap_username: v && !f.imap_username ? f.email : f.imap_username,
+                      }))
+                    }
+                  />
+                  <Label>IMAP uses different credentials</Label>
+                </div>
+                {form.imap_split && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>IMAP Username</Label>
+                      <Input value={form.imap_username} onChange={(e) => setForm((f) => ({ ...f, imap_username: e.target.value }))} placeholder="you@yourdomain.com" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>IMAP Password</Label>
+                      <Input type="password" value={form.imap_password} onChange={(e) => setForm((f) => ({ ...f, imap_password: e.target.value }))} />
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Switch checked={form.smtp_secure} onCheckedChange={(v) => setForm((f) => ({ ...f, smtp_secure: v }))} />
                   <Label>Use TLS/SSL</Label>
