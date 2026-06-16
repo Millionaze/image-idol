@@ -1,0 +1,2 @@
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS email_type TEXT NOT NULL DEFAULT 'plain' CHECK (email_type IN ('plain','html'));
+UPDATE public.campaigns SET email_type = 'plain' WHERE email_type IS NULL;
