@@ -104,6 +104,11 @@ export function AppSidebar() {
                   {unreadCount}
                 </Badge>
               )}
+              {item.title === "Inbox" && inboxUnreadCount > 0 && (
+                <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 min-w-[18px] flex items-center justify-center">
+                  {inboxUnreadCount}
+                </Badge>
+              )}
             </span>
           )}
         </NavLink>
