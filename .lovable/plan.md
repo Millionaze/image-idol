@@ -1,43 +1,53 @@
 ## Problem
 
-The Inbox is empty because `inbox-sync` is dying with **"CPU Time exceeded"** on every cron run. Logs show the function connects to the first 3 accounts (`consult@outreachli.com`, `mike@getpluggednetwork.com`, `amelia@aristral.com`) and is killed before any sync completes — no messages are upserted, no `last_synced_uid` is advanced, so the inbox stays empty forever.
+The `email_accounts` table has a single `username` / `password` pair used for both SMTP and IMAP. That works when SMTP and IMAP are the same provider, but breaks for hybrid setups like `dave@millionaze.net`:
 
-## Root cause
+- **SMTP** = Brevo → username `ae3170001@smtp-brevo.com` + Brevo SMTP key
+- **IMAP** = GoDaddy (`imap.secureserver.net`) → username `dave@millionaze.net` + mailbox password
 
-`inbox-sync` `fetch_all` mode iterates accounts **sequentially in one invocation**:
+Today the IMAP sync uses the Brevo credentials against GoDaddy, which is why every cron tick returns `AUTHENTICATIONFAILED`.
 
-```ts
-for (const acc of accounts || []) {
-  const r = await syncAccount(acc, supabaseAdmin);
-}
-```
+## Plan: split credentials into SMTP and IMAP
 
-Each `syncAccount` does a full IMAP handshake → LOGIN → SELECT → SEARCH → FETCH up to 50 messages → MIME-parse → per-message DB lookups for threading → upsert → per-message reply-event matching. With 5+ accounts that's well over the edge-function CPU budget (~150–400ms wall but strict CPU cap). The function is force-killed mid-account 2, every account after that never syncs, and the first account's `last_synced_uid` is only written if it reaches the end of its own body — so it keeps re-fetching the same UIDs next run and dying again.
+### Database (1 migration)
 
-Secondary contributor: the threading lookup runs **two DB queries per message** (parent lookup + 30-day subject scan of up to 50 rows) — that's 100+ awaits per account on top of the MIME work.
+Add two optional columns to `public.email_accounts`:
 
-## Fix
+- `imap_username TEXT`
+- `imap_password TEXT`
 
-1. **Parallelize accounts in `fetch_all`** — replace the `for` loop with `Promise.allSettled(accounts.map(syncAccount))`. Accounts are independent (different TCP connections, different rows); running them concurrently turns wall-time into the slowest single account instead of the sum, and CPU time per account stays under budget because each one spends most of its time awaiting network I/O.
+Backfill: leave both NULL. Existing accounts where SMTP=IMAP keep working because the read path falls back to `username` / `password` when the IMAP-specific fields are NULL.
 
-2. **Cut the threading cost** — skip the 30-day subject-scan fallback when `in_reply_to`/`references` already produced a match, and `.limit(20)` instead of 50. Also batch the parent-message lookup: do **one** `.in('message_id', allParentRefs)` query per account instead of one per message.
+No RLS or grant changes needed (columns added to existing table).
 
-3. **Skip the reply-event matching loop on the cron path** when a message has no `in_reply_to` *and* isn't from a known contact — currently every inbound message triggers a contact lookup. Gate it: only run the matcher for messages whose `from_email` domain matches a domain we've sent to (cheap pre-filter via a single `IN` query per account).
+### Edge functions
 
-4. **Persist progress incrementally** — move the `last_synced_uid` update to happen after each batch of 10 UIDs is upserted, not only at the very end. If the function is killed mid-account, the next run resumes instead of re-processing the same UIDs.
+- `inbox-sync/index.ts` — change credential resolution to:
+  ```
+  const username = account.imap_username || account.username || account.email;
+  const password = account.imap_password || account.password;
+  ```
+  Same change in `warmup-rescue` (uses IMAP) so it benefits from the split.
+- `send-campaign`, `smtp-test`, `process-sequences`, `warmup-run`, `_shared/send-email-internal`, `_shared/smtp-helpers` — keep using `account.username` / `account.password` (these are the SMTP credentials). No change needed there.
 
-5. **Cap per-account work harder on cron** — when invoked with `fetch_all: true`, lower the per-account fetch ceiling from 50 to 25 UIDs. Manual single-account syncs (the "Sync" button in the UI) keep the 50 cap.
+### UI (`src/pages/Accounts.tsx`)
 
-6. **Add a hard 8s timeout per account** — wrap `syncAccount` in `Promise.race` with an 8s deadline so one stalled IMAP server (Gmail can hang) can't drag the whole batch into the CPU cap.
+- Relabel current **Username / Password** fields to **SMTP Username / SMTP Password**.
+- Add a collapsible **"IMAP uses different credentials"** toggle below them. When checked, reveal two new fields: **IMAP Username** (defaults to email) and **IMAP Password**. Hidden by default so single-provider users see the same simple form.
+- On submit (Add + Edit), only include `imap_username` / `imap_password` in the payload when the toggle is on; otherwise send NULL (so we don't accidentally pin stale split creds for users who switch back to a unified provider).
+- Update the email-mirroring logic so changing the email auto-mirrors IMAP Username (when split is enabled and IMAP Username was empty/tracking email), not the SMTP one.
+- Drop the current "Username does not match Email" warning when split mode is on — that warning only makes sense for unified setups.
 
-## Out of scope
+### Out of scope
 
-- IMAP auth failures for `developer@aristral.com` / `musagillani@tz-solution.com` shown in `warmup-rescue` logs — separate credential issue, surface via UI later.
-- UI changes to Inbox/Unibox.
-- Re-architecting threading.
+- No change to `send-campaign`, sequencing, warmup send path — they correctly use SMTP creds today.
+- No "Test IMAP" button (separate request).
+- No migration of existing rows; users with hybrid setups need to open Edit, enable the toggle, and enter their IMAP creds once.
 
-## Files
+### Files touched
 
-- `supabase/functions/inbox-sync/index.ts` — all 6 changes above.
-
-No DB migration, no new secrets, no edge-function config changes.
+1. New migration adding `imap_username`, `imap_password` to `email_accounts`.
+2. `supabase/functions/inbox-sync/index.ts` — credential fallback.
+3. `supabase/functions/warmup-rescue/index.ts` — same fallback.
+4. `src/pages/Accounts.tsx` — split form fields + toggle + payload logic for both Add and Edit dialogs.
+5. `src/integrations/supabase/types.ts` — auto-regenerated, not edited by hand.
