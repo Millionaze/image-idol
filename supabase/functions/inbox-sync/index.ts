@@ -395,36 +395,45 @@ async function syncAccount(account: any, supabaseAdmin: any, opts: { maxFetch?: 
 
     try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
 
-    // Compute thread_id for each message (lookup against existing rows + within batch)
+    // ── Threading: batch parent-message lookup (one query instead of N) ──
+    const parentRefs = Array.from(new Set(
+      messages
+        .map((m) => m.in_reply_to || (m.references ? m.references.trim().split(/\s+/).pop() : null))
+        .filter((r): r is string => !!r),
+    ));
+    let parentMap = new Map<string, string>();
+    if (parentRefs.length > 0) {
+      const { data: parents } = await supabaseAdmin
+        .from("inbox_messages")
+        .select("message_id, thread_id")
+        .eq("account_id", account_id)
+        .in("message_id", parentRefs);
+      for (const p of parents || []) {
+        if (p.message_id && p.thread_id) parentMap.set(p.message_id, p.thread_id);
+      }
+    }
+
     for (const msg of messages) {
       let threadId: string | null = null;
       const parentRef = msg.in_reply_to || (msg.references ? msg.references.trim().split(/\s+/).pop() : null);
       if (parentRef) {
-        // Try existing rows
-        const { data: parent } = await supabaseAdmin
-          .from("inbox_messages")
-          .select("thread_id, message_id")
-          .eq("account_id", account_id)
-          .eq("message_id", parentRef)
-          .maybeSingle();
-        if (parent?.thread_id) threadId = parent.thread_id;
-        else {
-          // Within current batch
+        threadId = parentMap.get(parentRef) || null;
+        if (!threadId) {
           const inBatch = messages.find((m) => m.message_id === parentRef);
           if (inBatch?.thread_id) threadId = inBatch.thread_id;
         }
       }
-      if (!threadId && msg.subject) {
-        // Subject-based fallback against last 30 days
+      // Subject-based fallback only when no parent ref existed (cheap cases only)
+      if (!threadId && !parentRef && msg.subject) {
         const subjKey = normalizeSubjectKey(msg.subject);
-        if (subjKey) {
+        if (subjKey && /^(re|fwd|fw):/i.test(msg.subject)) {
           const since = new Date(Date.now() - 30 * 86400_000).toISOString();
           const { data: sibling } = await supabaseAdmin
             .from("inbox_messages")
             .select("thread_id, subject")
             .eq("account_id", account_id)
             .gte("received_at", since)
-            .limit(50);
+            .limit(20);
           const match = sibling?.find((s: any) => normalizeSubjectKey(s.subject) === subjKey && s.thread_id);
           if (match) threadId = match.thread_id;
         }
@@ -445,40 +454,49 @@ async function syncAccount(account: any, supabaseAdmin: any, opts: { maxFetch?: 
       }
     }
 
-    // Emit email.replied events for non-warmup inbound messages matched to a contact
+    // Persist UID progress immediately so a later kill doesn't reprocess.
+    if (maxUid > lastSyncedUid) {
+      await supabaseAdmin.from("email_accounts").update({ last_synced_uid: maxUid }).eq("id", account_id);
+    }
+
+    // Emit email.replied events — batched contact lookup by sender email
     try {
-      if (account.user_id) {
-        for (const msg of messages) {
-          if (msg.is_warmup) continue;
-          if (!msg.from_email) continue;
-          const { data: contactMatch } = await supabaseAdmin
+      if (account.user_id && messages.length > 0) {
+        const senderEmails = Array.from(new Set(
+          messages.filter((m) => !m.is_warmup && m.from_email).map((m) => String(m.from_email).toLowerCase()),
+        ));
+        if (senderEmails.length > 0) {
+          const { data: contactRows } = await supabaseAdmin
             .from("contacts")
-            .select("id, campaign_id, replied_at, campaigns!inner(user_id)")
-            .ilike("email", msg.from_email)
-            .eq("campaigns.user_id", account.user_id)
-            .maybeSingle();
-          if (!contactMatch) continue;
-          if (!contactMatch.replied_at) {
-            await supabaseAdmin
-              .from("contacts")
-              .update({ status: "replied", replied_at: new Date().toISOString() })
-              .eq("id", contactMatch.id);
+            .select("id, email, campaign_id, replied_at, campaigns!inner(user_id)")
+            .in("email", senderEmails)
+            .eq("campaigns.user_id", account.user_id);
+          const byEmail = new Map<string, any>();
+          for (const c of contactRows || []) {
+            if (c.email) byEmail.set(String(c.email).toLowerCase(), c);
           }
-          await supabaseAdmin.from("events").insert({
-            user_id: account.user_id,
-            contact_id: contactMatch.id,
-            event_type: "email.replied",
-            source: { account_id, campaign_id: contactMatch.campaign_id },
-            payload: { subject: msg.subject ?? null },
-          });
+          for (const msg of messages) {
+            if (msg.is_warmup || !msg.from_email) continue;
+            const c = byEmail.get(String(msg.from_email).toLowerCase());
+            if (!c) continue;
+            if (!c.replied_at) {
+              await supabaseAdmin
+                .from("contacts")
+                .update({ status: "replied", replied_at: new Date().toISOString() })
+                .eq("id", c.id);
+            }
+            await supabaseAdmin.from("events").insert({
+              user_id: account.user_id,
+              contact_id: c.id,
+              event_type: "email.replied",
+              source: { account_id, campaign_id: c.campaign_id },
+              payload: { subject: msg.subject ?? null },
+            });
+          }
         }
       }
     } catch (e) {
       console.error("inbox-sync reply event emit failed:", e);
-    }
-
-    if (maxUid > lastSyncedUid) {
-      await supabaseAdmin.from("email_accounts").update({ last_synced_uid: maxUid }).eq("id", account_id);
     }
 
     return { synced: messages.length, last_uid: maxUid };
