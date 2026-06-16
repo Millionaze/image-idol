@@ -20,6 +20,34 @@ import { Plus, Send, Megaphone, Eye, Loader2, Trash2, ArrowDown, Sparkles, Alert
 import { useToast } from "@/hooks/use-toast";
 import { WarmupGateModal } from "@/components/warmup/WarmupGateModal";
 import { computeScores } from "@/components/warmup/WarmupReadinessModal";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { RichTextEditor } from "@/components/shared/RichTextEditor";
+
+type EmailType = "plain" | "html";
+
+function plainToHtml(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (line.trim() ? `<p>${line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>` : "<br>"))
+    .join("");
+}
+
+function htmlToPlain(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 type ConditionType = "always" | "no_open" | "open_no_reply" | "link_click";
 
@@ -41,7 +69,7 @@ export default function Campaigns() {
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
   const [contacts, setContacts] = useState<any[]>([]);
   const [contactStates, setContactStates] = useState<any[]>([]);
-  const [form, setForm] = useState({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "", is_sequence: false });
+  const [form, setForm] = useState({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "", is_sequence: false, email_type: "plain" as EmailType });
   const [steps, setSteps] = useState<SequenceStep[]>([]);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
@@ -106,6 +134,7 @@ export default function Campaigns() {
         body: form.body,
         daily_limit: form.daily_limit,
         is_sequence: form.is_sequence,
+        email_type: form.email_type,
       }).select().single();
 
       if (error || !campaign) throw error || new Error("Failed to create");
@@ -138,7 +167,7 @@ export default function Campaigns() {
       }
 
       toast({ title: "Campaign created", description: `${contactRows.length} contacts added` });
-      setForm({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "", is_sequence: false });
+      setForm({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "", is_sequence: false, email_type: "plain" });
       setSteps([]);
       setOpen(false);
       load();
@@ -288,13 +317,48 @@ export default function Campaigns() {
                 <Input value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} placeholder="Hey {{name}}, quick question" />
               </div>
               <div className="space-y-2">
-                <Label>{form.is_sequence ? "Step 1 — Email Body" : "Email Body"}</Label>
-                <Textarea
-                  value={form.body}
-                  onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                  placeholder={"Hi {{name}},\n\nI noticed... Use {{name}} and {{email}} for personalization."}
-                  rows={5}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>{form.is_sequence ? "Step 1 — Email Body" : "Email Body"}</Label>
+                  <ToggleGroup
+                    type="single"
+                    size="sm"
+                    value={form.email_type}
+                    onValueChange={(v) => {
+                      if (!v || v === form.email_type) return;
+                      const next = v as EmailType;
+                      if (next === "html") {
+                        setForm((f) => ({ ...f, email_type: "html", body: f.body ? plainToHtml(f.body) : "" }));
+                      } else {
+                        if (form.body && !window.confirm("Switching to plain text will remove all HTML formatting. Continue?")) return;
+                        setForm((f) => ({ ...f, email_type: "plain", body: f.body ? htmlToPlain(f.body) : "" }));
+                      }
+                    }}
+                  >
+                    <ToggleGroupItem value="plain" className="text-xs h-7 px-2">Plain Text</ToggleGroupItem>
+                    <ToggleGroupItem value="html" className="text-xs h-7 px-2">HTML / Designed</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+                {form.email_type === "plain" ? (
+                  <>
+                    <Textarea
+                      value={form.body}
+                      onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+                      placeholder={"Hi {{name}},\n\nI noticed... Use {{name}} and {{email}} for personalization."}
+                      rows={8}
+                      className="font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">Plain text emails have higher deliverability for cold outreach. Line breaks are preserved.</p>
+                  </>
+                ) : (
+                  <>
+                    <RichTextEditor
+                      value={form.body}
+                      onChange={(html) => setForm((f) => ({ ...f, body: html }))}
+                      placeholder="Use {{name}} / {{email}} for personalization"
+                    />
+                    <p className="text-xs text-muted-foreground">Use HTML mode for newsletters or designed emails. Not recommended for cold outreach.</p>
+                  </>
+                )}
               </div>
 
               {/* Sequence steps */}
@@ -431,6 +495,9 @@ export default function Campaigns() {
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           {c.name}
+                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                            {c.email_type === "html" ? "HTML" : "PLAIN"}
+                          </span>
                           {c.paused_reason && (
                             <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30 gap-1">
                               <AlertTriangle className="h-3 w-3" />

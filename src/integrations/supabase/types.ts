@@ -175,6 +175,7 @@ export type Database = {
           bounce_count: number
           created_at: string
           daily_limit: number
+          email_type: string
           id: string
           is_sequence: boolean
           name: string
@@ -194,6 +195,7 @@ export type Database = {
           bounce_count?: number
           created_at?: string
           daily_limit?: number
+          email_type?: string
           id?: string
           is_sequence?: boolean
           name: string
@@ -213,6 +215,7 @@ export type Database = {
           bounce_count?: number
           created_at?: string
           daily_limit?: number
+          email_type?: string
           id?: string
           is_sequence?: boolean
           name?: string

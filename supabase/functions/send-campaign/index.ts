@@ -137,20 +137,30 @@ Deno.serve(async (req) => {
           .replace(/\{\{email\}\}/g, contact.email);
         const subject = sanitizeSubject(rawSubject);
 
-        const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
-        const rawBody = campaign.body
+        const isHtml = campaign.email_type === "html";
+        const personalizedBody = campaign.body
           .replace(/\{\{name\}\}/g, contactName)
-          .replace(/\{\{email\}\}/g, contact.email) + trackingPixel;
-        const html = sanitizeForSmtp(rawBody);
-        const text = htmlToText(rawBody);
+          .replace(/\{\{email\}\}/g, contact.email);
 
-        await client.send({
-          from: account.email,
-          to: contact.email,
-          subject,
-          content: text,
-          html,
-        });
+        if (isHtml) {
+          const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+          const rawBody = personalizedBody + trackingPixel;
+          await client.send({
+            from: account.email,
+            to: contact.email,
+            subject,
+            content: htmlToText(rawBody),
+            html: sanitizeForSmtp(rawBody),
+          });
+        } else {
+          // Plain text: send exactly what the user typed, no HTML wrapping, no tracking pixel.
+          await client.send({
+            from: account.email,
+            to: contact.email,
+            subject,
+            content: personalizedBody,
+          });
+        }
 
         await supabaseAdmin.from("contacts").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", contact.id);
         sentCount++;
