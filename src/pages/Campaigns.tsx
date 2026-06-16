@@ -166,7 +166,7 @@ export default function Campaigns() {
       }
 
       toast({ title: "Campaign created", description: `${contactRows.length} contacts added` });
-      setForm({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "", is_sequence: false });
+      setForm({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "", is_sequence: false, email_type: "plain" });
       setSteps([]);
       setOpen(false);
       load();
