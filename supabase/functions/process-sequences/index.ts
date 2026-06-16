@@ -90,9 +90,22 @@ Deno.serve(async (req) => {
           },
         });
 
+        // Resolve tracking base URL (use custom tracking domain if configured & verified)
+        let trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
+        try {
+          const { data: userSettings } = await supabase
+            .from("settings")
+            .select("tracking_domain, tracking_domain_verified")
+            .eq("user_id", campaign.user_id)
+            .maybeSingle();
+          if (userSettings?.tracking_domain && userSettings?.tracking_domain_verified) {
+            trackBaseUrl = `https://${userSettings.tracking_domain}/functions/v1/track-open`;
+          }
+        } catch (_) { /* ignore */ }
+
+        const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+
         if (isHtml) {
-          const trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
-          const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
           const rawBody = personalizedBody + trackingPixel;
           await client.send({
             from: account.email,
@@ -102,11 +115,16 @@ Deno.serve(async (req) => {
             html: sanitizeForSmtp(rawBody),
           });
         } else {
+          // Plain text: keep text as-is, attach minimal HTML alt part with pixel.
+          const escaped = personalizedBody
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const plainAsHtml = `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;">${escaped}</pre>${trackingPixel}`;
           await client.send({
             from: account.email,
             to: contact.email,
             subject,
             content: personalizedBody,
+            html: plainAsHtml,
           });
         }
         try { await client.close(); } catch { /* ignore */ }

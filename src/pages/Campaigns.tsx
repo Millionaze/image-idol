@@ -347,7 +347,7 @@ export default function Campaigns() {
                       rows={8}
                       className="font-mono text-sm"
                     />
-                    <p className="text-xs text-muted-foreground">Plain text emails have higher deliverability for cold outreach. Line breaks are preserved.</p>
+                    <p className="text-xs text-muted-foreground">Plain text emails have higher deliverability for cold outreach. Line breaks are preserved. Open tracking is included via a hidden pixel in the HTML alternative part.</p>
                   </>
                 ) : (
                   <>
