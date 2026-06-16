@@ -76,13 +76,10 @@ Deno.serve(async (req) => {
           .replace(/\{\{email\}\}/g, contact.email);
         const subject = sanitizeSubject(rawSubject);
 
-        const trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
-        const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
-        const rawBody = step.body
+        const isHtml = campaign.email_type === "html";
+        const personalizedBody = step.body
           .replace(/\{\{name\}\}/g, contactName)
-          .replace(/\{\{email\}\}/g, contact.email) + trackingPixel;
-        const html = sanitizeForSmtp(rawBody);
-        const text = htmlToText(rawBody);
+          .replace(/\{\{email\}\}/g, contact.email);
 
         const client = new SMTPClient({
           connection: {
@@ -93,13 +90,25 @@ Deno.serve(async (req) => {
           },
         });
 
-        await client.send({
-          from: account.email,
-          to: contact.email,
-          subject,
-          content: text,
-          html,
-        });
+        if (isHtml) {
+          const trackBaseUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/track-open`;
+          const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+          const rawBody = personalizedBody + trackingPixel;
+          await client.send({
+            from: account.email,
+            to: contact.email,
+            subject,
+            content: htmlToText(rawBody),
+            html: sanitizeForSmtp(rawBody),
+          });
+        } else {
+          await client.send({
+            from: account.email,
+            to: contact.email,
+            subject,
+            content: personalizedBody,
+          });
+        }
         try { await client.close(); } catch { /* ignore */ }
         // Get next step
         const { data: nextStep } = await supabase
