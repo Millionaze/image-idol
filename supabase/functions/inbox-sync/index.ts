@@ -244,13 +244,14 @@ function normalizeSubjectKey(s: string | null): string {
 }
 
 // ── Per-account sync (shared by single + fetch_all modes) ──
-async function syncAccount(account: any, supabaseAdmin: any): Promise<{ synced: number; last_uid?: number }> {
+async function syncAccount(account: any, supabaseAdmin: any, opts: { maxFetch?: number } = {}): Promise<{ synced: number; last_uid?: number }> {
   const account_id = account.id;
   const imapHost = account.imap_host;
   const imapPort = account.imap_port || 993;
   const username = account.username || account.email;
   const password = account.password;
   const lastSyncedUid = account.last_synced_uid || 0;
+  const maxFetch = opts.maxFetch ?? 50;
 
   if (!imapHost) throw new Error("IMAP host not configured for this account.");
 

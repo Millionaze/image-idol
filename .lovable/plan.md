@@ -1,55 +1,43 @@
+## Problem
 
-# Fix: stuck campaigns + sent_count discrepancy
+The Inbox is empty because `inbox-sync` is dying with **"CPU Time exceeded"** on every cron run. Logs show the function connects to the first 3 accounts (`consult@outreachli.com`, `mike@getpluggednetwork.com`, `amelia@aristral.com`) and is killed before any sync completes — no messages are upserted, no `last_synced_uid` is advanced, so the inbox stays empty forever.
 
-## What's wrong
+## Root cause
 
-`send-campaign` writes per-contact status inside the loop but only writes the campaign aggregate (`sent_count`, `bounce_count`, `status='active'`) **once, after the loop ends**. If the edge function dies during the loop — almost always because `denomailer.client.send()` hangs on a slow/dead MX — those aggregates and the status flip are lost. Result: dashboard says `0 sent / sending` while contacts table says `3 sent`. This is exactly what happened to **Outreach 2** (3 contacts sent at 19:07, `contact@consultevo.com` still pending, campaign stuck at `status='sending'`).
+`inbox-sync` `fetch_all` mode iterates accounts **sequentially in one invocation**:
 
-## Fixes
-
-### 1. Per-send timeout in `send-campaign`
-Wrap each `client.send(...)` in a `Promise.race` with a 25s timeout. On timeout, throw → caught by existing per-contact catch → treated as `transient` (contact stays `pending`, retried next run). This prevents a single bad domain from killing the whole batch.
-
-### 2. Incremental campaign counter updates
-Move the `campaigns.sent_count` / `bounce_count` increment from the post-loop block to *inside* the per-contact try/catch — increment after each successful send (and after each bounce). Final post-loop update only flips `status='active'`. Even if the function is killed mid-loop, the campaign row always reflects what actually happened.
-
-Use a single RPC-style update via `update({ sent_count: <new>, ... })` computed from the in-memory `campaign.sent_count + sentCount` running total — same pattern as today, just executed after each send instead of once at the end. (We accept the very small race window of two concurrent runs since `send-campaign` is invoked manually per campaign.)
-
-### 3. Always-finalize via `try/finally`
-Wrap the loop in `try { ... } finally { /* flip status='active' and persist counters */ }`. If the function still gets killed beyond CPU budget, at least every committed contact will have already updated the campaign counter (from fix #2).
-
-### 4. Fix the `req.clone().json()` bug (line 78)
-`req.json()` was already consumed on line 42. Capture the parsed body once at the top into `const body = await req.json()` and read `body.force_send` / `body.campaign_id` from it. No behavior change for normal sends; fixes the warmup-override path.
-
-### 5. One-time reconciliation of Outreach 2
-Run a single data update via the insert tool:
-```sql
-UPDATE public.campaigns c
-SET sent_count = sub.sent,
-    bounce_count = sub.bounced,
-    status = CASE WHEN sub.pending = 0 THEN 'active' ELSE 'sending' END
-FROM (
-  SELECT campaign_id,
-         count(*) FILTER (WHERE status='sent')    AS sent,
-         count(*) FILTER (WHERE status='bounced') AS bounced,
-         count(*) FILTER (WHERE status='pending') AS pending
-  FROM public.contacts GROUP BY campaign_id
-) sub
-WHERE c.id = sub.campaign_id
-  AND (c.sent_count <> sub.sent OR c.bounce_count <> sub.bounced);
+```ts
+for (const acc of accounts || []) {
+  const r = await syncAccount(acc, supabaseAdmin);
+}
 ```
-This fixes Outreach 2 immediately and also corrects any other historical drift.
 
-### 6. (Optional, recommended) Re-trigger pending contacts
-After fix #5, Outreach 2 will show `3 sent` and 1 pending. The user can hit "Send" again to retry `consultevo.com` (or let the existing `process-sequences` cron pick it up if sequences are configured). I'll add a one-line note in the response, not a code change.
+Each `syncAccount` does a full IMAP handshake → LOGIN → SELECT → SEARCH → FETCH up to 50 messages → MIME-parse → per-message DB lookups for threading → upsert → per-message reply-event matching. With 5+ accounts that's well over the edge-function CPU budget (~150–400ms wall but strict CPU cap). The function is force-killed mid-account 2, every account after that never syncs, and the first account's `last_synced_uid` is only written if it reaches the end of its own body — so it keeps re-fetching the same UIDs next run and dying again.
+
+Secondary contributor: the threading lookup runs **two DB queries per message** (parent lookup + 30-day subject scan of up to 50 rows) — that's 100+ awaits per account on top of the MIME work.
+
+## Fix
+
+1. **Parallelize accounts in `fetch_all`** — replace the `for` loop with `Promise.allSettled(accounts.map(syncAccount))`. Accounts are independent (different TCP connections, different rows); running them concurrently turns wall-time into the slowest single account instead of the sum, and CPU time per account stays under budget because each one spends most of its time awaiting network I/O.
+
+2. **Cut the threading cost** — skip the 30-day subject-scan fallback when `in_reply_to`/`references` already produced a match, and `.limit(20)` instead of 50. Also batch the parent-message lookup: do **one** `.in('message_id', allParentRefs)` query per account instead of one per message.
+
+3. **Skip the reply-event matching loop on the cron path** when a message has no `in_reply_to` *and* isn't from a known contact — currently every inbound message triggers a contact lookup. Gate it: only run the matcher for messages whose `from_email` domain matches a domain we've sent to (cheap pre-filter via a single `IN` query per account).
+
+4. **Persist progress incrementally** — move the `last_synced_uid` update to happen after each batch of 10 UIDs is upserted, not only at the very end. If the function is killed mid-account, the next run resumes instead of re-processing the same UIDs.
+
+5. **Cap per-account work harder on cron** — when invoked with `fetch_all: true`, lower the per-account fetch ceiling from 50 to 25 UIDs. Manual single-account syncs (the "Sync" button in the UI) keep the 50 cap.
+
+6. **Add a hard 8s timeout per account** — wrap `syncAccount` in `Promise.race` with an 8s deadline so one stalled IMAP server (Gmail can hang) can't drag the whole batch into the CPU cap.
 
 ## Out of scope
 
-- No change to plain/HTML send paths, tracking pixel, warmup gate logic, or `process-sequences`.
-- No change to the contacts or campaigns schema.
-- No change to UI.
+- IMAP auth failures for `developer@aristral.com` / `musagillani@tz-solution.com` shown in `warmup-rescue` logs — separate credential issue, surface via UI later.
+- UI changes to Inbox/Unibox.
+- Re-architecting threading.
 
-## Files touched
+## Files
 
-- **Edit** `supabase/functions/send-campaign/index.ts` — fixes #1, #2, #3, #4.
-- **Run** the reconciliation `UPDATE` via the `supabase--insert` tool — fix #5.
+- `supabase/functions/inbox-sync/index.ts` — all 6 changes above.
+
+No DB migration, no new secrets, no edge-function config changes.
