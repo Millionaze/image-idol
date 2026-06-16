@@ -1,31 +1,43 @@
-## What the screenshot tells us
+## Email Type Toggle: Plain Text vs HTML
 
-The error displayed is:
+### Existing editor found
+The codebase already has a TipTap-based editor at `src/components/shared/RichTextEditor.tsx` (with merge-tag support). I'll reuse it for HTML mode. The current campaign form uses a plain `<Textarea>` for the body.
 
-> Connection failed: Connection reset by peer (os error 104)
+### Changes
 
-That exact wording comes from the **previous** version of `supabase/functions/smtp-test/index.ts` (the old `catch` returned `` `Connection failed: ${connError.message}` ``). The new code I shipped last turn:
+**1. DB migration**
+- `ALTER TABLE campaigns ADD COLUMN email_type TEXT NOT NULL DEFAULT 'plain' CHECK (email_type IN ('plain','html'));`
+- Backfill: `UPDATE campaigns SET email_type='plain' WHERE email_type IS NULL;` (covered by NOT NULL DEFAULT, but explicit update included).
+- Also add to `sequence_steps` / `campaign_sequences`? **Out of scope** — only campaigns table per spec. Sequence steps will inherit the parent campaign's `email_type` at send time.
 
-- Returns classified messages like *"Your provider reset the connection on port 465. This is common with GoDaddy on port 465 from cloud IPs..."*
-- Automatically retries on **587 + STARTTLS** when 465 is reset, and if the retry succeeds, prompts the UI to save with those settings.
+**2. Campaign form (`src/pages/Campaigns.tsx`)**
+- Add `email_type: 'plain' | 'html'` to form state (default `'plain'`).
+- Add a `ToggleGroup` (Plain Text / HTML / Designed) at the top of the body section.
+- Plain mode: existing `<Textarea>` + muted hint *"Plain text emails have higher deliverability for cold outreach. Line breaks are preserved."*
+- HTML mode: `<RichTextEditor>` + muted hint *"Use HTML mode for newsletters or designed emails. Not recommended for cold outreach."*
+- Mode-switch handling:
+  - Plain → HTML: auto-wrap each line in `<p>` (blank lines → `<br>`), no confirm.
+  - HTML → Plain: `window.confirm("Switching to plain text will remove all HTML formatting. Continue?")`; on confirm, strip tags via the existing `htmlToText`-equivalent (small inline helper on the client).
+- For sequence steps (the `steps[]` array in the same form), keep them tied to the campaign's `email_type` (one toggle controls all steps in this campaign). No per-step toggle.
+- Insert payload includes `email_type`.
 
-Since the user is still seeing the old message, the new `smtp-test` Edge Function either didn't redeploy or the user's browser hit it before the new version went live.
+**3. Campaign list/detail**
+- Add a small muted badge next to each campaign's name on the cards: `PLAIN` or `HTML`.
 
-## Account-specific note
+**4. Send logic (`supabase/functions/send-campaign/index.ts` and `process-sequences/index.ts`)**
+- Read `campaign.email_type`. 
+  - `plain`: `client.send({ from, to, subject, content: body + trackingPixelTextNote })` — note: the tracking pixel is HTML-only, so in plain mode we **omit the tracking pixel** (open tracking won't work for plain text, which is expected for cold outreach). Document this in the hint? The spec says "what the user types is exactly what gets sent" so we skip the pixel entirely in plain mode.
+  - `html`: current behavior — `content: htmlToText(body)`, `html: body + trackingPixel`.
+- Use existing `htmlToText` from `_shared/smtp-helpers.ts` (the spec calls it `stripHtml`; we'll reuse `htmlToText` which already exists).
 
-`mike@getpluggednetwork.com` on `smtpout.secureserver.net:465` is the classic GoDaddy-from-cloud-IP block. Port **587 with STARTTLS** is almost always the fix for this combination — exactly what the new fallback handles automatically.
+**5. Out of scope**
+- SMTP infra, warmup, auth, anything else.
 
-## Plan
+### Files touched
+- migration (new)
+- `src/pages/Campaigns.tsx`
+- `supabase/functions/send-campaign/index.ts`
+- `supabase/functions/process-sequences/index.ts`
 
-1. **Force-redeploy `smtp-test`.** Touch the file (a trivial comment edit) so Lovable picks up a new deploy, then verify via `edge_function_logs` that a new boot timestamp appears.
-2. **No code logic changes** — last turn's implementation is correct. This is purely a redeploy/verification step.
-3. **Ask the user to retry** after redeploy. Expected outcomes:
-   - The function silently tries 465, fails with reset, retries 587+STARTTLS, succeeds, and the UI shows a confirm prompt: *"Port 465 was reset by smtpout.secureserver.net, but port 587 with STARTTLS worked. Save with these settings instead?"* → user clicks OK → account is saved.
-   - Or, if 587 also fails, they see the new actionable error (specific GoDaddy guidance), not the raw `os error 104`.
-4. **Immediate workaround** the user can do right now without waiting: change SMTP Port from `465` to `587` and toggle **Use TLS/SSL off**, then click Connect Account. That bypasses the 465 problem and uses STARTTLS, which GoDaddy reliably accepts.
-
-## Out of scope
-
-- No DB changes.
-- No changes to send-campaign / process-sequences / warmup-run.
-- IMAP settings (`imap.secureserver.net:993`) look correct — untouched.
+### Note on tracking pixel in plain mode
+Per spec, plain mode sends exactly what the user typed with no HTML wrapping — so the 1×1 tracking pixel is dropped for plain emails (open tracking only works in HTML). Confirm this is acceptable; if you'd rather keep open tracking, we'd need to send plain campaigns as multipart with an HTML alt part (which contradicts "no HTML wrapping").
