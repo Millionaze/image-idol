@@ -134,6 +134,7 @@ export default function Campaigns() {
         body: form.body,
         daily_limit: form.daily_limit,
         is_sequence: form.is_sequence,
+        email_type: form.email_type,
       }).select().single();
 
       if (error || !campaign) throw error || new Error("Failed to create");
