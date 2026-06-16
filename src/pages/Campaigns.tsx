@@ -69,7 +69,7 @@ export default function Campaigns() {
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
   const [contacts, setContacts] = useState<any[]>([]);
   const [contactStates, setContactStates] = useState<any[]>([]);
-  const [form, setForm] = useState({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "", is_sequence: false });
+  const [form, setForm] = useState({ name: "", account_id: "", subject: "", body: "", daily_limit: 50, contactsRaw: "", is_sequence: false, email_type: "plain" as EmailType });
   const [steps, setSteps] = useState<SequenceStep[]>([]);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
