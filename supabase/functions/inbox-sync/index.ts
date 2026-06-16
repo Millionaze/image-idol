@@ -136,87 +136,64 @@ function htmlToPlainText(html: string): string {
     .trim();
 }
 
-// ── MIME parser: extract readable body from raw message ──
-function parseMimeBody(rawBody: string, headerBlock: string): string {
-  // Get content-type from headers
+// ── MIME parser: extract readable body (plain + html) from raw message ──
+function parseMimeBody(rawBody: string, headerBlock: string): { plain: string; html: string } {
   const ctMatch = headerBlock.match(/^Content-Type:\s*(.+?)(?:\r?\n(?!\s)|\r?\n$)/ims);
   const contentType = ctMatch ? ctMatch[1].replace(/\s+/g, " ").trim() : "";
-
-  // Get transfer encoding from headers
   const cteMatch = headerBlock.match(/^Content-Transfer-Encoding:\s*(\S+)/mi);
   const transferEncoding = cteMatch ? cteMatch[1].trim().toLowerCase() : "7bit";
-
-  // Check if multipart
   const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/i);
 
   if (boundaryMatch) {
-    const boundary = boundaryMatch[1];
-    return extractFromMultipart(rawBody, boundary);
+    return extractFromMultipart(rawBody, boundaryMatch[1]);
   }
-
-  // Single part — decode directly
-  return decodePart(rawBody, transferEncoding, contentType);
+  const decoded = decodePartRaw(rawBody, transferEncoding);
+  if (contentType.toLowerCase().includes("text/html")) {
+    return { plain: htmlToPlainText(decoded), html: decoded };
+  }
+  return { plain: decoded, html: "" };
 }
 
-function extractFromMultipart(body: string, boundary: string): string {
+function extractFromMultipart(body: string, boundary: string): { plain: string; html: string } {
   const delim = "--" + boundary;
   const parts = body.split(delim);
-  
   let plainText = "";
   let htmlText = "";
 
   for (const part of parts) {
     if (part.startsWith("--") || part.trim() === "") continue;
-
-    // Split part headers from part body
     const headerEnd = part.indexOf("\r\n\r\n");
     if (headerEnd === -1) continue;
-
     const partHeaders = part.substring(0, headerEnd);
     const partBody = part.substring(headerEnd + 4);
-
     const partCtMatch = partHeaders.match(/Content-Type:\s*([^;\r\n]+)/i);
     const partCt = partCtMatch ? partCtMatch[1].trim().toLowerCase() : "";
-    
     const partCteMatch = partHeaders.match(/Content-Transfer-Encoding:\s*(\S+)/i);
     const partCte = partCteMatch ? partCteMatch[1].trim().toLowerCase() : "7bit";
 
-    // Check for nested multipart
     const nestedBoundary = partHeaders.match(/boundary="?([^";\s]+)"?/i);
     if (nestedBoundary) {
       const nested = extractFromMultipart(partBody, nestedBoundary[1]);
-      if (nested) return nested;
+      if (nested.plain && !plainText) plainText = nested.plain;
+      if (nested.html && !htmlText) htmlText = nested.html;
       continue;
     }
 
-    if (partCt.includes("text/plain")) {
-      plainText = decodePart(partBody, partCte, partCt);
-    } else if (partCt.includes("text/html")) {
-      htmlText = decodePart(partBody, partCte, partCt);
+    if (partCt.includes("text/plain") && !plainText) {
+      plainText = decodePartRaw(partBody, partCte);
+    } else if (partCt.includes("text/html") && !htmlText) {
+      htmlText = decodePartRaw(partBody, partCte);
     }
-    // skip attachments, images, etc.
   }
 
-  if (plainText.trim()) return plainText.trim();
-  if (htmlText.trim()) return htmlToPlainText(htmlText);
-  return "";
+  if (!plainText && htmlText) plainText = htmlToPlainText(htmlText);
+  return { plain: plainText.trim(), html: htmlText.trim() };
 }
 
-function decodePart(body: string, encoding: string, contentType: string): string {
-  // Remove trailing boundary markers
+function decodePartRaw(body: string, encoding: string): string {
   let cleaned = body.replace(/--[^\r\n]+--\s*$/, "").trim();
-
-  if (encoding === "quoted-printable") {
-    cleaned = decodeQuotedPrintable(cleaned);
-  } else if (encoding === "base64") {
-    cleaned = decodeBase64(cleaned);
-  }
-
-  // If it's HTML, convert to plain text
-  if (contentType.toLowerCase().includes("text/html")) {
-    cleaned = htmlToPlainText(cleaned);
-  }
-
+  if (encoding === "quoted-printable") cleaned = decodeQuotedPrintable(cleaned);
+  else if (encoding === "base64") cleaned = decodeBase64(cleaned);
   return cleaned;
 }
 
@@ -241,296 +218,340 @@ function parseDate(headerBlock: string): string | null {
   try { return new Date(m[1].trim()).toISOString(); } catch { return new Date().toISOString(); }
 }
 
-// ── Main handler ──
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+function parseSingleHeader(headerBlock: string, name: string): string | null {
+  const re = new RegExp(`^${name}:\\s*(.+)$`, "mi");
+  const m = headerBlock.match(re);
+  return m ? m[1].trim() : null;
+}
+
+function parseAllHeaders(headerBlock: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  // Unfold headers (lines starting with whitespace are continuations)
+  const unfolded = headerBlock.replace(/\r?\n[ \t]+/g, " ");
+  for (const line of unfolded.split(/\r?\n/)) {
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const key = line.substring(0, idx).trim();
+    const val = line.substring(idx + 1).trim();
+    if (key) out[key] = val;
+  }
+  return out;
+}
+
+function normalizeSubjectKey(s: string | null): string {
+  if (!s) return "";
+  return s.replace(/^(re|fwd|fw):\s*/gi, "").trim().toLowerCase();
+}
+
+// ── Per-account sync (shared by single + fetch_all modes) ──
+async function syncAccount(account: any, supabaseAdmin: any): Promise<{ synced: number; last_uid?: number }> {
+  const account_id = account.id;
+  const imapHost = account.imap_host;
+  const imapPort = account.imap_port || 993;
+  const username = account.username || account.email;
+  const password = account.password;
+  const lastSyncedUid = account.last_synced_uid || 0;
+
+  if (!imapHost) throw new Error("IMAP host not configured for this account.");
+
+  console.log(`Connecting to IMAP ${imapHost}:${imapPort} for ${account.email}`);
+
+  let conn: Deno.TlsConn | Deno.Conn;
+  if (imapPort === 993) {
+    conn = await Deno.connectTls({ hostname: imapHost, port: imapPort });
+  } else {
+    conn = await Deno.connect({ hostname: imapHost, port: imapPort });
   }
 
+  const reader = new ImapReader(conn);
+
   try {
+    const greeting = await reader.readGreeting(10000);
+    if (!greeting.includes("OK")) throw new Error(`Server rejected connection: ${greeting.substring(0, 200)}`);
+
+    if (imapPort !== 993) {
+      await conn.write(encoder.encode("T0 STARTTLS\r\n"));
+      const starttlsResp = await reader.readUntilTag("T0", 10000);
+      if (starttlsResp.includes("T0 OK")) {
+        conn = await Deno.startTls(conn as Deno.Conn, { hostname: imapHost });
+        reader.setConn(conn);
+      }
+    }
+
+    let tagNum = 1;
+    const nextTag = () => `A${tagNum++}`;
+
+    const escapedUser = username.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const escapedPass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const loginTag = nextTag();
+    const loginResp = await sendCommand(reader, conn, loginTag, `LOGIN "${escapedUser}" "${escapedPass}"`);
+    checkOk(loginResp, loginTag);
+
+    const selectTag = nextTag();
+    const selectResp = await sendCommand(reader, conn, selectTag, "SELECT INBOX");
+    checkOk(selectResp, selectTag);
+
+    const existsMatch = selectResp.match(/\*\s+(\d+)\s+EXISTS/i);
+    const totalMessages = existsMatch ? parseInt(existsMatch[1]) : 0;
+
+    if (totalMessages === 0) {
+      try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
+      return { synced: 0 };
+    }
+
+    const searchTag = nextTag();
+    const searchCmd = lastSyncedUid > 0
+      ? `UID SEARCH UID ${lastSyncedUid + 1}:*`
+      : `UID SEARCH ${Math.max(1, totalMessages - 49)}:*`;
+    const searchResp = await sendCommand(reader, conn, searchTag, searchCmd);
+    checkOk(searchResp, searchTag);
+
+    const searchLine = searchResp.split("\r\n").find(l => l.startsWith("* SEARCH"));
+    const uids: number[] = [];
+    if (searchLine) {
+      for (const p of searchLine.replace("* SEARCH", "").trim().split(/\s+/)) {
+        const uid = parseInt(p);
+        if (!isNaN(uid) && uid > lastSyncedUid) uids.push(uid);
+      }
+    }
+
+    if (uids.length === 0) {
+      try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
+      return { synced: 0 };
+    }
+
+    const fetchUids = uids.slice(0, 50);
+    let maxUid = lastSyncedUid;
+
+    const messages: any[] = [];
+
+    for (let i = 0; i < fetchUids.length; i += 10) {
+      const batch = fetchUids.slice(i, i + 10);
+      const fetchTag = nextTag();
+      const fetchResp = await sendCommand(reader, conn, fetchTag, `UID FETCH ${batch.join(",")} (UID RFC822)`);
+
+      const fetchBlocks = fetchResp.split(/\*\s+\d+\s+FETCH\s+/i).filter(b => b.trim());
+
+      for (const block of fetchBlocks) {
+        const uidMatch = block.match(/UID\s+(\d+)/i);
+        if (!uidMatch) continue;
+        const uid = parseInt(uidMatch[1]);
+        if (uid > maxUid) maxUid = uid;
+
+        const literalMatch = block.match(/RFC822\}\s*\{(\d+)\}\r\n([\s\S]*)/i);
+        let rawMessage = "";
+        if (literalMatch) rawMessage = literalMatch[2];
+        else {
+          const altMatch = block.match(/RFC822\s+\{(\d+)\}\r\n([\s\S]*)/i);
+          if (altMatch) rawMessage = altMatch[2];
+          else {
+            const firstLine = block.indexOf("\r\n");
+            if (firstLine > 0) rawMessage = block.substring(firstLine + 2);
+          }
+        }
+        if (!rawMessage) continue;
+
+        const headerBodySep = rawMessage.indexOf("\r\n\r\n");
+        const fullHeaders = headerBodySep > 0 ? rawMessage.substring(0, headerBodySep) : rawMessage;
+        const rawBody = headerBodySep > 0 ? rawMessage.substring(headerBodySep + 4) : "";
+
+        const from = parseFrom(fullHeaders);
+        const subject = parseSubject(fullHeaders);
+        const date = parseDate(fullHeaders);
+        const messageId = parseSingleHeader(fullHeaders, "Message-ID");
+        const inReplyTo = parseSingleHeader(fullHeaders, "In-Reply-To");
+        const references = parseSingleHeader(fullHeaders, "References");
+        const rawHeaders = parseAllHeaders(fullHeaders);
+
+        let parsed: { plain: string; html: string } = { plain: "", html: "" };
+        try {
+          parsed = parseMimeBody(rawBody, fullHeaders);
+        } catch (e) {
+          console.error("MIME parse error, using raw:", e);
+          parsed = { plain: rawBody.substring(0, 5000), html: "" };
+        }
+        let bodyText = parsed.plain;
+        if (bodyText.length > 10000) bodyText = bodyText.substring(0, 10000) + "\n...[truncated]";
+        let bodyHtml = parsed.html;
+        if (bodyHtml.length > 50000) bodyHtml = bodyHtml.substring(0, 50000);
+
+        messages.push({
+          account_id,
+          from_email: from.email,
+          from_name: from.name,
+          subject,
+          body: bodyText || null,
+          body_html: bodyHtml || null,
+          received_at: date || new Date().toISOString(),
+          message_uid: `${account_id}:${uid}`,
+          message_id: messageId,
+          in_reply_to: inReplyTo,
+          references,
+          raw_headers: rawHeaders,
+        });
+      }
+    }
+
+    try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
+
+    // Compute thread_id for each message (lookup against existing rows + within batch)
+    for (const msg of messages) {
+      let threadId: string | null = null;
+      const parentRef = msg.in_reply_to || (msg.references ? msg.references.trim().split(/\s+/).pop() : null);
+      if (parentRef) {
+        // Try existing rows
+        const { data: parent } = await supabaseAdmin
+          .from("inbox_messages")
+          .select("thread_id, message_id")
+          .eq("account_id", account_id)
+          .eq("message_id", parentRef)
+          .maybeSingle();
+        if (parent?.thread_id) threadId = parent.thread_id;
+        else {
+          // Within current batch
+          const inBatch = messages.find((m) => m.message_id === parentRef);
+          if (inBatch?.thread_id) threadId = inBatch.thread_id;
+        }
+      }
+      if (!threadId && msg.subject) {
+        // Subject-based fallback against last 30 days
+        const subjKey = normalizeSubjectKey(msg.subject);
+        if (subjKey) {
+          const since = new Date(Date.now() - 30 * 86400_000).toISOString();
+          const { data: sibling } = await supabaseAdmin
+            .from("inbox_messages")
+            .select("thread_id, subject")
+            .eq("account_id", account_id)
+            .gte("received_at", since)
+            .limit(50);
+          const match = sibling?.find((s: any) => normalizeSubjectKey(s.subject) === subjKey && s.thread_id);
+          if (match) threadId = match.thread_id;
+        }
+      }
+      msg.thread_id = threadId || msg.message_id || msg.message_uid;
+    }
+
+    if (messages.length > 0) {
+      const { error: insertError } = await supabaseAdmin
+        .from("inbox_messages")
+        .upsert(messages, { onConflict: "account_id,message_uid" });
+
+      if (insertError) {
+        console.error("Upsert error:", insertError);
+        for (const msg of messages) {
+          await supabaseAdmin.from("inbox_messages").insert(msg);
+        }
+      }
+    }
+
+    // Emit email.replied events for non-warmup inbound messages matched to a contact
+    try {
+      if (account.user_id) {
+        for (const msg of messages) {
+          if (msg.is_warmup) continue;
+          if (!msg.from_email) continue;
+          const { data: contactMatch } = await supabaseAdmin
+            .from("contacts")
+            .select("id, campaign_id, replied_at, campaigns!inner(user_id)")
+            .ilike("email", msg.from_email)
+            .eq("campaigns.user_id", account.user_id)
+            .maybeSingle();
+          if (!contactMatch) continue;
+          if (!contactMatch.replied_at) {
+            await supabaseAdmin
+              .from("contacts")
+              .update({ status: "replied", replied_at: new Date().toISOString() })
+              .eq("id", contactMatch.id);
+          }
+          await supabaseAdmin.from("events").insert({
+            user_id: account.user_id,
+            contact_id: contactMatch.id,
+            event_type: "email.replied",
+            source: { account_id, campaign_id: contactMatch.campaign_id },
+            payload: { subject: msg.subject ?? null },
+          });
+        }
+      }
+    } catch (e) {
+      console.error("inbox-sync reply event emit failed:", e);
+    }
+
+    if (maxUid > lastSyncedUid) {
+      await supabaseAdmin.from("email_accounts").update({ last_synced_uid: maxUid }).eq("id", account_id);
+    }
+
+    return { synced: messages.length, last_uid: maxUid };
+  } finally {
+    try { conn.close(); } catch {}
+  }
+}
+
+// ── Main handler ──
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const supabaseAdmin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  try {
+    const body = await req.json().catch(() => ({}));
+
+    // ── Cron / batch mode ──
+    if (body.fetch_all === true) {
+      const { data: accounts, error: accListErr } = await supabaseAdmin
+        .from("email_accounts")
+        .select("*")
+        .not("imap_host", "is", null);
+      if (accListErr) throw accListErr;
+
+      const results: Array<{ account_id: string; email: string; synced?: number; error?: string }> = [];
+      for (const acc of accounts || []) {
+        try {
+          const r = await syncAccount(acc, supabaseAdmin);
+          results.push({ account_id: acc.id, email: acc.email, synced: r.synced });
+        } catch (e: any) {
+          results.push({ account_id: acc.id, email: acc.email, error: String(e?.message || e) });
+        }
+      }
+      return new Response(JSON.stringify({ mode: "fetch_all", count: results.length, results }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ── Single-account mode (authenticated user) ──
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
-
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
+      { global: { headers: { Authorization: authHeader } } },
     );
-
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
-    const userId = user.id;
 
-    const { account_id } = await req.json();
+    const account_id = body.account_id;
     if (!account_id) {
       return new Response(JSON.stringify({ error: "account_id required" }), { status: 400, headers: corsHeaders });
     }
 
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
     const { data: account, error: accError } = await supabaseAdmin
-      .from("email_accounts").select("*").eq("id", account_id).eq("user_id", userId).single();
-
+      .from("email_accounts").select("*").eq("id", account_id).eq("user_id", user.id).single();
     if (accError || !account) {
       return new Response(JSON.stringify({ error: "Account not found or access denied" }), { status: 404, headers: corsHeaders });
     }
 
-    const imapHost = account.imap_host;
-    const imapPort = account.imap_port || 993;
-    const username = account.username || account.email;
-    const password = account.password;
-    const lastSyncedUid = (account as any).last_synced_uid || 0;
-
-    if (!imapHost) {
-      return new Response(JSON.stringify({ error: "IMAP host not configured for this account." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    console.log(`Connecting to IMAP ${imapHost}:${imapPort} for ${account.email}`);
-
-    let conn: Deno.TlsConn | Deno.Conn;
-    if (imapPort === 993) {
-      conn = await Deno.connectTls({ hostname: imapHost, port: imapPort });
-    } else {
-      conn = await Deno.connect({ hostname: imapHost, port: imapPort });
-    }
-
-    const reader = new ImapReader(conn);
-
-    try {
-      const greeting = await reader.readGreeting(10000);
-      console.log("Greeting:", greeting.trim());
-      if (!greeting.includes("OK")) throw new Error(`Server rejected connection: ${greeting.substring(0, 200)}`);
-
-      if (imapPort !== 993) {
-        await conn.write(encoder.encode("T0 STARTTLS\r\n"));
-        const starttlsResp = await reader.readUntilTag("T0", 10000);
-        if (starttlsResp.includes("T0 OK")) {
-          conn = await Deno.startTls(conn as Deno.Conn, { hostname: imapHost });
-          reader.setConn(conn);
-        }
-      }
-
-      let tagNum = 1;
-      const nextTag = () => `A${tagNum++}`;
-
-      // LOGIN
-      const loginTag = nextTag();
-      const escapedUser = username.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const escapedPass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const loginResp = await sendCommand(reader, conn, loginTag, `LOGIN "${escapedUser}" "${escapedPass}"`);
-      checkOk(loginResp, loginTag);
-
-      // SELECT INBOX
-      const selectTag = nextTag();
-      const selectResp = await sendCommand(reader, conn, selectTag, "SELECT INBOX");
-      checkOk(selectResp, selectTag);
-
-      const existsMatch = selectResp.match(/\*\s+(\d+)\s+EXISTS/i);
-      const totalMessages = existsMatch ? parseInt(existsMatch[1]) : 0;
-      console.log(`INBOX: ${totalMessages} messages, last synced UID: ${lastSyncedUid}`);
-
-      if (totalMessages === 0) {
-        try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
-        return new Response(JSON.stringify({ message: "Inbox is empty", synced: 0 }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      // UID SEARCH
-      const searchTag = nextTag();
-      let searchCmd: string;
-      if (lastSyncedUid > 0) {
-        searchCmd = `UID SEARCH UID ${lastSyncedUid + 1}:*`;
-      } else {
-        const startSeq = Math.max(1, totalMessages - 49);
-        searchCmd = `UID SEARCH ${startSeq}:*`;
-      }
-      const searchResp = await sendCommand(reader, conn, searchTag, searchCmd);
-      checkOk(searchResp, searchTag);
-
-      const searchLine = searchResp.split("\r\n").find(l => l.startsWith("* SEARCH"));
-      const uids: number[] = [];
-      if (searchLine) {
-        for (const p of searchLine.replace("* SEARCH", "").trim().split(/\s+/)) {
-          const uid = parseInt(p);
-          if (!isNaN(uid) && uid > lastSyncedUid) uids.push(uid);
-        }
-      }
-
-      console.log(`Found ${uids.length} new UIDs`);
-
-      if (uids.length === 0) {
-        try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
-        return new Response(JSON.stringify({ message: "No new messages", synced: 0 }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const fetchUids = uids.slice(0, 50);
-      let maxUid = lastSyncedUid;
-
-      const messages: Array<{
-        account_id: string; from_email: string | null; from_name: string | null;
-        subject: string | null; body: string | null; received_at: string; message_uid: string;
-      }> = [];
-
-      // Fetch full RFC822 message so we can parse MIME properly
-      for (let i = 0; i < fetchUids.length; i += 10) {
-        const batch = fetchUids.slice(i, i + 10);
-        const uidList = batch.join(",");
-        const fetchTag = nextTag();
-        const fetchResp = await sendCommand(
-          reader, conn, fetchTag,
-          `UID FETCH ${uidList} (UID RFC822)`
-        );
-
-        // Split on FETCH responses
-        const fetchBlocks = fetchResp.split(/\*\s+\d+\s+FETCH\s+/i).filter(b => b.trim());
-
-        for (const block of fetchBlocks) {
-          const uidMatch = block.match(/UID\s+(\d+)/i);
-          if (!uidMatch) continue;
-          const uid = parseInt(uidMatch[1]);
-          if (uid > maxUid) maxUid = uid;
-
-          // Extract RFC822 literal: {size}\r\n<message>
-          const literalMatch = block.match(/RFC822\}\s*\{(\d+)\}\r\n([\s\S]*)/i);
-          let rawMessage = "";
-          if (literalMatch) {
-            rawMessage = literalMatch[2];
-          } else {
-            // Try alternate format
-            const altMatch = block.match(/RFC822\s+\{(\d+)\}\r\n([\s\S]*)/i);
-            if (altMatch) rawMessage = altMatch[2];
-            else {
-              // Fallback: take everything after first \r\n
-              const firstLine = block.indexOf("\r\n");
-              if (firstLine > 0) rawMessage = block.substring(firstLine + 2);
-            }
-          }
-
-          if (!rawMessage) continue;
-
-          // Split headers and body
-          const headerBodySep = rawMessage.indexOf("\r\n\r\n");
-          const fullHeaders = headerBodySep > 0 ? rawMessage.substring(0, headerBodySep) : rawMessage;
-          const rawBody = headerBodySep > 0 ? rawMessage.substring(headerBodySep + 4) : "";
-
-          const from = parseFrom(fullHeaders);
-          const subject = parseSubject(fullHeaders);
-          const date = parseDate(fullHeaders);
-
-          let bodyText = "";
-          try {
-            bodyText = parseMimeBody(rawBody, fullHeaders);
-          } catch (e) {
-            console.error("MIME parse error, using raw:", e);
-            bodyText = rawBody.substring(0, 5000);
-          }
-
-          // Truncate
-          if (bodyText.length > 10000) {
-            bodyText = bodyText.substring(0, 10000) + "\n...[truncated]";
-          }
-
-          messages.push({
-            account_id,
-            from_email: from.email,
-            from_name: from.name,
-            subject,
-            body: bodyText || null,
-            received_at: date || new Date().toISOString(),
-            message_uid: `${account_id}:${uid}`,
-          });
-        }
-      }
-
-      try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
-
-      console.log(`Parsed ${messages.length} messages, inserting`);
-
-      if (messages.length > 0) {
-        // Use upsert without ignoreDuplicates so existing broken messages get repaired
-        const { error: insertError } = await supabaseAdmin
-          .from("inbox_messages")
-          .upsert(messages, { onConflict: "account_id,message_uid" });
-
-        if (insertError) {
-          console.error("Upsert error:", insertError);
-          let inserted = 0;
-          for (const msg of messages) {
-            const { error: singleErr } = await supabaseAdmin.from("inbox_messages").insert(msg);
-            if (!singleErr) inserted++;
-          }
-          console.log(`Fallback: inserted ${inserted}/${messages.length}`);
-        }
-      }
-
-      // Emit email.replied events for non-warmup inbound messages matched to a contact by sender email.
-      try {
-        const { data: account } = await supabaseAdmin
-          .from("email_accounts")
-          .select("user_id")
-          .eq("id", account_id)
-          .single();
-        if (account?.user_id) {
-          for (const msg of messages) {
-            if ((msg as any).is_warmup) continue;
-            const fromEmail = (msg as any).from_email;
-            if (!fromEmail) continue;
-            const { data: contactMatch } = await supabaseAdmin
-              .from("contacts")
-              .select("id, campaign_id, replied_at, campaigns!inner(user_id)")
-              .ilike("email", fromEmail)
-              .eq("campaigns.user_id", account.user_id)
-              .maybeSingle();
-            if (!contactMatch) continue;
-            if (!contactMatch.replied_at) {
-              await supabaseAdmin
-                .from("contacts")
-                .update({ status: "replied", replied_at: new Date().toISOString() })
-                .eq("id", contactMatch.id);
-            }
-            await supabaseAdmin.from("events").insert({
-              user_id: account.user_id,
-              contact_id: contactMatch.id,
-              event_type: "email.replied",
-              source: { account_id, campaign_id: contactMatch.campaign_id },
-              payload: { subject: (msg as any).subject ?? null },
-            });
-          }
-        }
-      } catch (e) {
-        console.error("inbox-sync reply event emit failed:", e);
-      }
-
-      if (maxUid > lastSyncedUid) {
-        await supabaseAdmin
-          .from("email_accounts")
-          .update({ last_synced_uid: maxUid } as any)
-          .eq("id", account_id);
-      }
-
-      return new Response(JSON.stringify({
-        message: `Synced ${messages.length} new messages`,
-        synced: messages.length,
-        last_uid: maxUid,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-
-    } finally {
-      try { conn.close(); } catch {}
-    }
+    const r = await syncAccount(account, supabaseAdmin);
+    return new Response(JSON.stringify({
+      message: `Synced ${r.synced} new messages`,
+      synced: r.synced,
+      last_uid: r.last_uid,
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error: any) {
     console.error("inbox-sync error:", error);
@@ -538,7 +559,7 @@ Deno.serve(async (req) => {
     const isAuth = /AUTHENTICATIONFAILED|Authentication failed|LOGIN failed|Invalid credentials/i.test(msg);
     return new Response(JSON.stringify({
       error: isAuth
-        ? "IMAP authentication failed. The username/password stored for this account was rejected by the mail server. For GoDaddy/Outlook/Gmail you may need an app-specific password, or to enable IMAP access. Update the credentials in Accounts → Edit."
+        ? "IMAP authentication failed. Update credentials in Accounts → Edit."
         : msg,
       code: isAuth ? "imap_auth_failed" : "imap_error",
     }), {
@@ -547,4 +568,5 @@ Deno.serve(async (req) => {
     });
   }
 });
+
 

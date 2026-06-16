@@ -15,6 +15,9 @@ verify_jwt = false
 [functions.inbox-sync]
 verify_jwt = false
 
+[functions.send-reply]
+verify_jwt = false
+
 [functions.check-dns]
 verify_jwt = false
 

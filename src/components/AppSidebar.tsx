@@ -47,21 +47,43 @@ export function AppSidebar() {
   const location = useLocation();
   const { signOut } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
 
   useEffect(() => {
     const loadUnread = async () => {
       try {
-        const { count } = await supabase
-          .from("inbox_messages")
-          .select("*", { count: "exact", head: true })
-          .eq("is_read", false)
-          .eq("is_warmup", false);
-        setUnreadCount(count || 0);
+        const [{ count: uniboxCount }, { count: inboxCount }] = await Promise.all([
+          supabase
+            .from("inbox_messages")
+            .select("*", { count: "exact", head: true })
+            .eq("is_read", false)
+            .eq("is_warmup", false),
+          supabase
+            .from("inbox_messages")
+            .select("*", { count: "exact", head: true })
+            .eq("is_read", false)
+            .eq("is_warmup", false)
+            .eq("is_archived", false)
+            .eq("is_outbound", false),
+        ]);
+        setUnreadCount(uniboxCount || 0);
+        setInboxUnreadCount(inboxCount || 0);
       } catch { /* silent */ }
     };
     loadUnread();
+    const channel = supabase
+      .channel("sidebar-inbox-unread")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "inbox_messages" },
+        () => loadUnread(),
+      )
+      .subscribe();
     const interval = setInterval(loadUnread, 120000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const renderNavItem = (item: typeof mainItems[0]) => (
@@ -80,6 +102,11 @@ export function AppSidebar() {
               {item.title === "Unibox" && unreadCount > 0 && (
                 <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 min-w-[18px] flex items-center justify-center">
                   {unreadCount}
+                </Badge>
+              )}
+              {item.title === "Inbox" && inboxUnreadCount > 0 && (
+                <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 min-w-[18px] flex items-center justify-center">
+                  {inboxUnreadCount}
                 </Badge>
               )}
             </span>
