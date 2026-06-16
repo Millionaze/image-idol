@@ -317,13 +317,48 @@ export default function Campaigns() {
                 <Input value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} placeholder="Hey {{name}}, quick question" />
               </div>
               <div className="space-y-2">
-                <Label>{form.is_sequence ? "Step 1 — Email Body" : "Email Body"}</Label>
-                <Textarea
-                  value={form.body}
-                  onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                  placeholder={"Hi {{name}},\n\nI noticed... Use {{name}} and {{email}} for personalization."}
-                  rows={5}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>{form.is_sequence ? "Step 1 — Email Body" : "Email Body"}</Label>
+                  <ToggleGroup
+                    type="single"
+                    size="sm"
+                    value={form.email_type}
+                    onValueChange={(v) => {
+                      if (!v || v === form.email_type) return;
+                      const next = v as EmailType;
+                      if (next === "html") {
+                        setForm((f) => ({ ...f, email_type: "html", body: f.body ? plainToHtml(f.body) : "" }));
+                      } else {
+                        if (form.body && !window.confirm("Switching to plain text will remove all HTML formatting. Continue?")) return;
+                        setForm((f) => ({ ...f, email_type: "plain", body: f.body ? htmlToPlain(f.body) : "" }));
+                      }
+                    }}
+                  >
+                    <ToggleGroupItem value="plain" className="text-xs h-7 px-2">Plain Text</ToggleGroupItem>
+                    <ToggleGroupItem value="html" className="text-xs h-7 px-2">HTML / Designed</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+                {form.email_type === "plain" ? (
+                  <>
+                    <Textarea
+                      value={form.body}
+                      onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+                      placeholder={"Hi {{name}},\n\nI noticed... Use {{name}} and {{email}} for personalization."}
+                      rows={8}
+                      className="font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">Plain text emails have higher deliverability for cold outreach. Line breaks are preserved.</p>
+                  </>
+                ) : (
+                  <>
+                    <RichTextEditor
+                      value={form.body}
+                      onChange={(html) => setForm((f) => ({ ...f, body: html }))}
+                      placeholder="Use {{name}} / {{email}} for personalization"
+                    />
+                    <p className="text-xs text-muted-foreground">Use HTML mode for newsletters or designed emails. Not recommended for cold outreach.</p>
+                  </>
+                )}
               </div>
 
               {/* Sequence steps */}
