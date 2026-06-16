@@ -534,8 +534,17 @@ Deno.serve(async (req) => {
 
   } catch (error: any) {
     console.error("inbox-sync error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const msg = String(error?.message || error);
+    const isAuth = /AUTHENTICATIONFAILED|Authentication failed|LOGIN failed|Invalid credentials/i.test(msg);
+    return new Response(JSON.stringify({
+      error: isAuth
+        ? "IMAP authentication failed. The username/password stored for this account was rejected by the mail server. For GoDaddy/Outlook/Gmail you may need an app-specific password, or to enable IMAP access. Update the credentials in Accounts → Edit."
+        : msg,
+      code: isAuth ? "imap_auth_failed" : "imap_error",
+    }), {
+      status: isAuth ? 401 : 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
+
