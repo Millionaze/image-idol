@@ -26,6 +26,7 @@ const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host:
 const emptyForm = {
   name: "", email: "", smtp_host: "", smtp_port: 587, smtp_secure: true,
   imap_host: "", imap_port: 993, username: "", password: "",
+  imap_split: false, imap_username: "", imap_password: "",
 };
 
 export default function Accounts() {
@@ -62,6 +63,9 @@ export default function Accounts() {
       imap_port: a.imap_port || 993,
       username: a.username || "",
       password: "", // never pre-fill — leave blank to keep current
+      imap_split: !!a.imap_username,
+      imap_username: a.imap_username || "",
+      imap_password: "", // never pre-fill
     });
   };
 
@@ -69,11 +73,11 @@ export default function Accounts() {
     if (!editAccount) return;
     setEditError(null);
 
-    // Same guardrail as Add: warn if username doesn't match email
-    if (editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase()) {
+    // Guardrail only applies when SMTP and IMAP share credentials.
+    if (!editForm.imap_split && editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase()) {
       const ok = window.confirm(
-        `The Username (${editForm.username}) does not match the Email Address (${editForm.email}).\n\n` +
-        `This means the IMAP/SMTP server will log into the "${editForm.username}" mailbox, not "${editForm.email}".\n\n` +
+        `The SMTP Username (${editForm.username}) does not match the Email Address (${editForm.email}).\n\n` +
+        `This means the server will log into the "${editForm.username}" mailbox, not "${editForm.email}".\n\n` +
         `Continue only if you're sure this is correct.`
       );
       if (!ok) return;
@@ -90,13 +94,31 @@ export default function Accounts() {
       username: editForm.username,
     };
 
-    // Only update password if user typed something
+    // Only update SMTP password if user typed something
     const passwordChanged = editForm.password.length > 0;
     if (passwordChanged) update.password = editForm.password;
 
+    // IMAP-specific credentials: only set when split mode is enabled.
+    // When toggling split off, clear them so the IMAP path falls back to SMTP creds.
+    let imapCredsChanged = false;
+    if (editForm.imap_split) {
+      if (editForm.imap_username !== (editAccount.imap_username || "")) {
+        update.imap_username = editForm.imap_username;
+        imapCredsChanged = true;
+      }
+      if (editForm.imap_password.length > 0) {
+        update.imap_password = editForm.imap_password;
+        imapCredsChanged = true;
+      }
+    } else if (editAccount.imap_username || editAccount.imap_password) {
+      update.imap_username = null;
+      update.imap_password = null;
+      imapCredsChanged = true;
+    }
+
     // If credentials/mailbox changed, reset sync cursor so we don't skip messages in the new mailbox
     const usernameChanged = editForm.username !== editAccount.username;
-    if (usernameChanged || passwordChanged) {
+    if (usernameChanged || passwordChanged || imapCredsChanged) {
       update.last_synced_uid = 0;
     }
 
@@ -106,7 +128,7 @@ export default function Accounts() {
       if (error) throw error;
       toast({
         title: "Account updated",
-        description: usernameChanged || passwordChanged
+        description: usernameChanged || passwordChanged || imapCredsChanged
           ? "Sync cursor reset — click Sync to refresh from the new mailbox."
           : undefined,
       });
@@ -201,10 +223,10 @@ export default function Accounts() {
   const saveAccount = async () => {
     if (!user) return;
 
-    // Guardrail: warn if the IMAP/SMTP username doesn't match the account email.
-    // A mismatch usually means the wrong mailbox will be synced (which has caused
-    // "I see someone else's emails in this account" bugs).
+    // Guardrail: warn if SMTP-and-IMAP-shared username doesn't match email.
+    // Skipped when IMAP credentials are split (since they're intentionally different).
     if (
+      !form.imap_split &&
       form.username.trim().toLowerCase() !== form.email.trim().toLowerCase()
     ) {
       const ok = window.confirm(
@@ -250,7 +272,15 @@ export default function Accounts() {
 
     setSaving(true);
     try {
-      const { error } = await supabase.from("email_accounts").insert({ user_id: user.id, ...finalForm });
+      // Strip the UI-only `imap_split` flag and only persist IMAP creds when enabled.
+      const { imap_split, imap_username, imap_password, ...rest } = finalForm;
+      const payload: any = {
+        user_id: user.id,
+        ...rest,
+        imap_username: imap_split ? imap_username : null,
+        imap_password: imap_split ? imap_password : null,
+      };
+      const { error } = await supabase.from("email_accounts").insert(payload);
       if (error) throw error;
       toast({ title: "Account added" });
       setForm(emptyForm);
@@ -389,19 +419,44 @@ export default function Accounts() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Username</Label>
+                    <Label>SMTP Username</Label>
                     <Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} />
                     <p className="text-xs text-muted-foreground">
-                      Usually the same as your email. Only change this if your provider uses a different IMAP/SMTP login (rare).
+                      Usually the same as your email. Providers like Brevo use a separate SMTP login.
                     </p>
-                    {form.username && form.email && form.username.trim().toLowerCase() !== form.email.trim().toLowerCase() && (
+                    {!form.imap_split && form.username && form.email && form.username.trim().toLowerCase() !== form.email.trim().toLowerCase() && (
                       <p className="text-xs text-destructive">
-                        ⚠ Username does not match Email — you'll sync the "{form.username}" mailbox, not "{form.email}".
+                        ⚠ Username does not match Email — if your IMAP server uses your email instead, enable "IMAP uses different credentials" below.
                       </p>
                     )}
                   </div>
-                  <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
+                  <div className="space-y-2"><Label>SMTP Password</Label><Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
                 </div>
+                <div className="flex items-center gap-2 pt-2 border-t border-border/50">
+                  <Switch
+                    checked={form.imap_split}
+                    onCheckedChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        imap_split: v,
+                        imap_username: v && !f.imap_username ? f.email : f.imap_username,
+                      }))
+                    }
+                  />
+                  <Label>IMAP uses different credentials</Label>
+                </div>
+                {form.imap_split && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>IMAP Username</Label>
+                      <Input value={form.imap_username} onChange={(e) => setForm((f) => ({ ...f, imap_username: e.target.value }))} placeholder="you@yourdomain.com" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>IMAP Password</Label>
+                      <Input type="password" value={form.imap_password} onChange={(e) => setForm((f) => ({ ...f, imap_password: e.target.value }))} />
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Switch checked={form.smtp_secure} onCheckedChange={(v) => setForm((f) => ({ ...f, smtp_secure: v }))} />
                   <Label>Use TLS/SSL</Label>
@@ -588,19 +643,19 @@ export default function Accounts() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Username</Label>
+                <Label>SMTP Username</Label>
                 <Input value={editForm.username} onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))} />
                 <p className="text-xs text-muted-foreground">
-                  Usually the same as your email. Only change this if your provider uses a different IMAP/SMTP login (rare).
+                  Usually the same as your email. Providers like Brevo use a separate SMTP login.
                 </p>
-                {editForm.username && editForm.email && editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase() && (
+                {!editForm.imap_split && editForm.username && editForm.email && editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase() && (
                   <p className="text-xs text-destructive">
-                    ⚠ Username does not match Email — you'll sync the "{editForm.username}" mailbox, not "{editForm.email}".
+                    ⚠ Username does not match Email — if your IMAP server uses your email instead, enable "IMAP uses different credentials" below.
                   </p>
                 )}
               </div>
               <div className="space-y-2">
-                <Label>Password</Label>
+                <Label>SMTP Password</Label>
                 <Input
                   type="password"
                   value={editForm.password}
@@ -609,6 +664,36 @@ export default function Accounts() {
                 />
               </div>
             </div>
+            <div className="flex items-center gap-2 pt-2 border-t border-border/50">
+              <Switch
+                checked={editForm.imap_split}
+                onCheckedChange={(v) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    imap_split: v,
+                    imap_username: v && !f.imap_username ? f.email : f.imap_username,
+                  }))
+                }
+              />
+              <Label>IMAP uses different credentials</Label>
+            </div>
+            {editForm.imap_split && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>IMAP Username</Label>
+                  <Input value={editForm.imap_username} onChange={(e) => setEditForm((f) => ({ ...f, imap_username: e.target.value }))} placeholder="you@yourdomain.com" />
+                </div>
+                <div className="space-y-2">
+                  <Label>IMAP Password</Label>
+                  <Input
+                    type="password"
+                    value={editForm.imap_password}
+                    onChange={(e) => setEditForm((f) => ({ ...f, imap_password: e.target.value }))}
+                    placeholder="Leave blank to keep current password"
+                  />
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Switch checked={editForm.smtp_secure} onCheckedChange={(v) => setEditForm((f) => ({ ...f, smtp_secure: v }))} />
               <Label>Use TLS/SSL</Label>

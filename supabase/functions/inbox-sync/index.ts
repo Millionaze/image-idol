@@ -248,8 +248,8 @@ async function syncAccount(account: any, supabaseAdmin: any, opts: { maxFetch?: 
   const account_id = account.id;
   const imapHost = account.imap_host;
   const imapPort = account.imap_port || 993;
-  const username = account.username || account.email;
-  const password = account.password;
+  const username = account.imap_username || account.username || account.email;
+  const password = account.imap_password || account.password;
   const lastSyncedUid = account.last_synced_uid || 0;
   const maxFetch = opts.maxFetch ?? 50;
 

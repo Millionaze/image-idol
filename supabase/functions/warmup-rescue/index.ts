@@ -121,7 +121,9 @@ Deno.serve(async (req) => {
         await reader.readLine();
 
         // Login
-        const loginResp = await imapCommand(writer, reader, "A1", `LOGIN "${account.username}" "${account.password}"`);
+        const imapUser = account.imap_username || account.username || account.email;
+        const imapPass = account.imap_password || account.password;
+        const loginResp = await imapCommand(writer, reader, "A1", `LOGIN "${imapUser}" "${imapPass}"`);
         const loginOk = loginResp.some(l => l.startsWith("A1 OK"));
         if (!loginOk) {
           console.error(`IMAP login failed for ${account.email}`);

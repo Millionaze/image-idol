@@ -580,7 +580,9 @@ export type Database = {
           email: string
           id: string
           imap_host: string | null
+          imap_password: string | null
           imap_port: number | null
+          imap_username: string | null
           last_reply_length: string
           last_synced_uid: number
           mark_important_rate: number
@@ -609,7 +611,9 @@ export type Database = {
           email: string
           id?: string
           imap_host?: string | null
+          imap_password?: string | null
           imap_port?: number | null
+          imap_username?: string | null
           last_reply_length?: string
           last_synced_uid?: number
           mark_important_rate?: number
@@ -638,7 +642,9 @@ export type Database = {
           email?: string
           id?: string
           imap_host?: string | null
+          imap_password?: string | null
           imap_port?: number | null
+          imap_username?: string | null
           last_reply_length?: string
           last_synced_uid?: number
           mark_important_rate?: number
