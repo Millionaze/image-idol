@@ -20,6 +20,34 @@ import { Plus, Send, Megaphone, Eye, Loader2, Trash2, ArrowDown, Sparkles, Alert
 import { useToast } from "@/hooks/use-toast";
 import { WarmupGateModal } from "@/components/warmup/WarmupGateModal";
 import { computeScores } from "@/components/warmup/WarmupReadinessModal";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { RichTextEditor } from "@/components/shared/RichTextEditor";
+
+type EmailType = "plain" | "html";
+
+function plainToHtml(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (line.trim() ? `<p>${line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>` : "<br>"))
+    .join("");
+}
+
+function htmlToPlain(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 type ConditionType = "always" | "no_open" | "open_no_reply" | "link_click";
 
