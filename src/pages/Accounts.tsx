@@ -26,6 +26,7 @@ const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host:
 const emptyForm = {
   name: "", email: "", smtp_host: "", smtp_port: 587, smtp_secure: true,
   imap_host: "", imap_port: 993, username: "", password: "",
+  imap_split: false, imap_username: "", imap_password: "",
 };
 
 export default function Accounts() {
