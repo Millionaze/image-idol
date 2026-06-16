@@ -283,8 +283,9 @@ async function syncAccount(account: any, supabaseAdmin: any): Promise<{ synced: 
 
     const escapedUser = username.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const escapedPass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const loginResp = await sendCommand(reader, conn, nextTag(), `LOGIN "${escapedUser}" "${escapedPass}"`);
-    checkOk(loginResp, loginResp.match(/^A\d+/)?.[0] || "A1");
+    const loginTag = nextTag();
+    const loginResp = await sendCommand(reader, conn, loginTag, `LOGIN "${escapedUser}" "${escapedPass}"`);
+    checkOk(loginResp, loginTag);
 
     const selectTag = nextTag();
     const selectResp = await sendCommand(reader, conn, selectTag, "SELECT INBOX");
