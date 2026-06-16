@@ -136,87 +136,64 @@ function htmlToPlainText(html: string): string {
     .trim();
 }
 
-// ── MIME parser: extract readable body from raw message ──
-function parseMimeBody(rawBody: string, headerBlock: string): string {
-  // Get content-type from headers
+// ── MIME parser: extract readable body (plain + html) from raw message ──
+function parseMimeBody(rawBody: string, headerBlock: string): { plain: string; html: string } {
   const ctMatch = headerBlock.match(/^Content-Type:\s*(.+?)(?:\r?\n(?!\s)|\r?\n$)/ims);
   const contentType = ctMatch ? ctMatch[1].replace(/\s+/g, " ").trim() : "";
-
-  // Get transfer encoding from headers
   const cteMatch = headerBlock.match(/^Content-Transfer-Encoding:\s*(\S+)/mi);
   const transferEncoding = cteMatch ? cteMatch[1].trim().toLowerCase() : "7bit";
-
-  // Check if multipart
   const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/i);
 
   if (boundaryMatch) {
-    const boundary = boundaryMatch[1];
-    return extractFromMultipart(rawBody, boundary);
+    return extractFromMultipart(rawBody, boundaryMatch[1]);
   }
-
-  // Single part — decode directly
-  return decodePart(rawBody, transferEncoding, contentType);
+  const decoded = decodePartRaw(rawBody, transferEncoding);
+  if (contentType.toLowerCase().includes("text/html")) {
+    return { plain: htmlToPlainText(decoded), html: decoded };
+  }
+  return { plain: decoded, html: "" };
 }
 
-function extractFromMultipart(body: string, boundary: string): string {
+function extractFromMultipart(body: string, boundary: string): { plain: string; html: string } {
   const delim = "--" + boundary;
   const parts = body.split(delim);
-  
   let plainText = "";
   let htmlText = "";
 
   for (const part of parts) {
     if (part.startsWith("--") || part.trim() === "") continue;
-
-    // Split part headers from part body
     const headerEnd = part.indexOf("\r\n\r\n");
     if (headerEnd === -1) continue;
-
     const partHeaders = part.substring(0, headerEnd);
     const partBody = part.substring(headerEnd + 4);
-
     const partCtMatch = partHeaders.match(/Content-Type:\s*([^;\r\n]+)/i);
     const partCt = partCtMatch ? partCtMatch[1].trim().toLowerCase() : "";
-    
     const partCteMatch = partHeaders.match(/Content-Transfer-Encoding:\s*(\S+)/i);
     const partCte = partCteMatch ? partCteMatch[1].trim().toLowerCase() : "7bit";
 
-    // Check for nested multipart
     const nestedBoundary = partHeaders.match(/boundary="?([^";\s]+)"?/i);
     if (nestedBoundary) {
       const nested = extractFromMultipart(partBody, nestedBoundary[1]);
-      if (nested) return nested;
+      if (nested.plain && !plainText) plainText = nested.plain;
+      if (nested.html && !htmlText) htmlText = nested.html;
       continue;
     }
 
-    if (partCt.includes("text/plain")) {
-      plainText = decodePart(partBody, partCte, partCt);
-    } else if (partCt.includes("text/html")) {
-      htmlText = decodePart(partBody, partCte, partCt);
+    if (partCt.includes("text/plain") && !plainText) {
+      plainText = decodePartRaw(partBody, partCte);
+    } else if (partCt.includes("text/html") && !htmlText) {
+      htmlText = decodePartRaw(partBody, partCte);
     }
-    // skip attachments, images, etc.
   }
 
-  if (plainText.trim()) return plainText.trim();
-  if (htmlText.trim()) return htmlToPlainText(htmlText);
-  return "";
+  if (!plainText && htmlText) plainText = htmlToPlainText(htmlText);
+  return { plain: plainText.trim(), html: htmlText.trim() };
 }
 
-function decodePart(body: string, encoding: string, contentType: string): string {
-  // Remove trailing boundary markers
+function decodePartRaw(body: string, encoding: string): string {
   let cleaned = body.replace(/--[^\r\n]+--\s*$/, "").trim();
-
-  if (encoding === "quoted-printable") {
-    cleaned = decodeQuotedPrintable(cleaned);
-  } else if (encoding === "base64") {
-    cleaned = decodeBase64(cleaned);
-  }
-
-  // If it's HTML, convert to plain text
-  if (contentType.toLowerCase().includes("text/html")) {
-    cleaned = htmlToPlainText(cleaned);
-  }
-
+  if (encoding === "quoted-printable") cleaned = decodeQuotedPrintable(cleaned);
+  else if (encoding === "base64") cleaned = decodeBase64(cleaned);
   return cleaned;
 }
 
