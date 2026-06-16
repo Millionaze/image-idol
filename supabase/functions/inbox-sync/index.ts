@@ -321,7 +321,7 @@ async function syncAccount(account: any, supabaseAdmin: any, opts: { maxFetch?: 
       return { synced: 0 };
     }
 
-    const fetchUids = uids.slice(0, 50);
+    const fetchUids = uids.slice(0, maxFetch);
     let maxUid = lastSyncedUid;
 
     const messages: any[] = [];
