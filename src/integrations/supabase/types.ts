@@ -742,38 +742,68 @@ export type Database = {
         Row: {
           account_id: string
           body: string | null
+          body_html: string | null
           from_email: string | null
           from_name: string | null
           id: string
+          in_reply_to: string | null
+          is_archived: boolean
+          is_outbound: boolean
           is_read: boolean
+          is_replied: boolean
           is_warmup: boolean
+          message_id: string | null
           message_uid: string | null
+          raw_headers: Json | null
           received_at: string
+          references: string | null
+          replied_at: string | null
           subject: string | null
+          thread_id: string | null
         }
         Insert: {
           account_id: string
           body?: string | null
+          body_html?: string | null
           from_email?: string | null
           from_name?: string | null
           id?: string
+          in_reply_to?: string | null
+          is_archived?: boolean
+          is_outbound?: boolean
           is_read?: boolean
+          is_replied?: boolean
           is_warmup?: boolean
+          message_id?: string | null
           message_uid?: string | null
+          raw_headers?: Json | null
           received_at?: string
+          references?: string | null
+          replied_at?: string | null
           subject?: string | null
+          thread_id?: string | null
         }
         Update: {
           account_id?: string
           body?: string | null
+          body_html?: string | null
           from_email?: string | null
           from_name?: string | null
           id?: string
+          in_reply_to?: string | null
+          is_archived?: boolean
+          is_outbound?: boolean
           is_read?: boolean
+          is_replied?: boolean
           is_warmup?: boolean
+          message_id?: string | null
           message_uid?: string | null
+          raw_headers?: Json | null
           received_at?: string
+          references?: string | null
+          replied_at?: string | null
           subject?: string | null
+          thread_id?: string | null
         }
         Relationships: [
           {
