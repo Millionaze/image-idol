@@ -495,6 +495,9 @@ export default function Campaigns() {
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           {c.name}
+                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                            {c.email_type === "html" ? "HTML" : "PLAIN"}
+                          </span>
                           {c.paused_reason && (
                             <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30 gap-1">
                               <AlertTriangle className="h-3 w-3" />
