@@ -525,15 +525,21 @@ Deno.serve(async (req) => {
         .not("imap_host", "is", null);
       if (accListErr) throw accListErr;
 
-      const results: Array<{ account_id: string; email: string; synced?: number; error?: string }> = [];
-      for (const acc of accounts || []) {
-        try {
-          const r = await syncAccount(acc, supabaseAdmin);
-          results.push({ account_id: acc.id, email: acc.email, synced: r.synced });
-        } catch (e: any) {
-          results.push({ account_id: acc.id, email: acc.email, error: String(e?.message || e) });
-        }
-      }
+      const ACCOUNT_TIMEOUT_MS = 8_000;
+      const settled = await Promise.allSettled(
+        (accounts || []).map((acc: any) =>
+          Promise.race([
+            syncAccount(acc, supabaseAdmin, { maxFetch: 25 }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("account sync timeout")), ACCOUNT_TIMEOUT_MS),
+            ),
+          ]).then(
+            (r: any) => ({ account_id: acc.id, email: acc.email, synced: r.synced }),
+            (e: any) => ({ account_id: acc.id, email: acc.email, error: String(e?.message || e) }),
+          ),
+        ),
+      );
+      const results = settled.map((s) => (s.status === "fulfilled" ? s.value : { error: String(s.reason) }));
       return new Response(JSON.stringify({ mode: "fetch_all", count: results.length, results }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
