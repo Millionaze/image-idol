@@ -73,11 +73,11 @@ export default function Accounts() {
     if (!editAccount) return;
     setEditError(null);
 
-    // Same guardrail as Add: warn if username doesn't match email
-    if (editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase()) {
+    // Guardrail only applies when SMTP and IMAP share credentials.
+    if (!editForm.imap_split && editForm.username.trim().toLowerCase() !== editForm.email.trim().toLowerCase()) {
       const ok = window.confirm(
-        `The Username (${editForm.username}) does not match the Email Address (${editForm.email}).\n\n` +
-        `This means the IMAP/SMTP server will log into the "${editForm.username}" mailbox, not "${editForm.email}".\n\n` +
+        `The SMTP Username (${editForm.username}) does not match the Email Address (${editForm.email}).\n\n` +
+        `This means the server will log into the "${editForm.username}" mailbox, not "${editForm.email}".\n\n` +
         `Continue only if you're sure this is correct.`
       );
       if (!ok) return;
@@ -94,13 +94,31 @@ export default function Accounts() {
       username: editForm.username,
     };
 
-    // Only update password if user typed something
+    // Only update SMTP password if user typed something
     const passwordChanged = editForm.password.length > 0;
     if (passwordChanged) update.password = editForm.password;
 
+    // IMAP-specific credentials: only set when split mode is enabled.
+    // When toggling split off, clear them so the IMAP path falls back to SMTP creds.
+    let imapCredsChanged = false;
+    if (editForm.imap_split) {
+      if (editForm.imap_username !== (editAccount.imap_username || "")) {
+        update.imap_username = editForm.imap_username;
+        imapCredsChanged = true;
+      }
+      if (editForm.imap_password.length > 0) {
+        update.imap_password = editForm.imap_password;
+        imapCredsChanged = true;
+      }
+    } else if (editAccount.imap_username || editAccount.imap_password) {
+      update.imap_username = null;
+      update.imap_password = null;
+      imapCredsChanged = true;
+    }
+
     // If credentials/mailbox changed, reset sync cursor so we don't skip messages in the new mailbox
     const usernameChanged = editForm.username !== editAccount.username;
-    if (usernameChanged || passwordChanged) {
+    if (usernameChanged || passwordChanged || imapCredsChanged) {
       update.last_synced_uid = 0;
     }
 
@@ -110,7 +128,7 @@ export default function Accounts() {
       if (error) throw error;
       toast({
         title: "Account updated",
-        description: usernameChanged || passwordChanged
+        description: usernameChanged || passwordChanged || imapCredsChanged
           ? "Sync cursor reset — click Sync to refresh from the new mailbox."
           : undefined,
       });
