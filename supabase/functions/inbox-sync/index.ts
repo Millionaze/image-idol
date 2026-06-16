@@ -218,6 +218,31 @@ function parseDate(headerBlock: string): string | null {
   try { return new Date(m[1].trim()).toISOString(); } catch { return new Date().toISOString(); }
 }
 
+function parseSingleHeader(headerBlock: string, name: string): string | null {
+  const re = new RegExp(`^${name}:\\s*(.+)$`, "mi");
+  const m = headerBlock.match(re);
+  return m ? m[1].trim() : null;
+}
+
+function parseAllHeaders(headerBlock: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  // Unfold headers (lines starting with whitespace are continuations)
+  const unfolded = headerBlock.replace(/\r?\n[ \t]+/g, " ");
+  for (const line of unfolded.split(/\r?\n/)) {
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const key = line.substring(0, idx).trim();
+    const val = line.substring(idx + 1).trim();
+    if (key) out[key] = val;
+  }
+  return out;
+}
+
+function normalizeSubjectKey(s: string | null): string {
+  if (!s) return "";
+  return s.replace(/^(re|fwd|fw):\s*/gi, "").trim().toLowerCase();
+}
+
 // ── Main handler ──
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
