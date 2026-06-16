@@ -244,13 +244,14 @@ function normalizeSubjectKey(s: string | null): string {
 }
 
 // ── Per-account sync (shared by single + fetch_all modes) ──
-async function syncAccount(account: any, supabaseAdmin: any): Promise<{ synced: number; last_uid?: number }> {
+async function syncAccount(account: any, supabaseAdmin: any, opts: { maxFetch?: number } = {}): Promise<{ synced: number; last_uid?: number }> {
   const account_id = account.id;
   const imapHost = account.imap_host;
   const imapPort = account.imap_port || 993;
   const username = account.username || account.email;
   const password = account.password;
   const lastSyncedUid = account.last_synced_uid || 0;
+  const maxFetch = opts.maxFetch ?? 50;
 
   if (!imapHost) throw new Error("IMAP host not configured for this account.");
 
@@ -320,7 +321,7 @@ async function syncAccount(account: any, supabaseAdmin: any): Promise<{ synced: 
       return { synced: 0 };
     }
 
-    const fetchUids = uids.slice(0, 50);
+    const fetchUids = uids.slice(0, maxFetch);
     let maxUid = lastSyncedUid;
 
     const messages: any[] = [];
@@ -394,36 +395,45 @@ async function syncAccount(account: any, supabaseAdmin: any): Promise<{ synced: 
 
     try { await sendCommand(reader, conn, nextTag(), "LOGOUT"); } catch {}
 
-    // Compute thread_id for each message (lookup against existing rows + within batch)
+    // ── Threading: batch parent-message lookup (one query instead of N) ──
+    const parentRefs = Array.from(new Set(
+      messages
+        .map((m) => m.in_reply_to || (m.references ? m.references.trim().split(/\s+/).pop() : null))
+        .filter((r): r is string => !!r),
+    ));
+    let parentMap = new Map<string, string>();
+    if (parentRefs.length > 0) {
+      const { data: parents } = await supabaseAdmin
+        .from("inbox_messages")
+        .select("message_id, thread_id")
+        .eq("account_id", account_id)
+        .in("message_id", parentRefs);
+      for (const p of parents || []) {
+        if (p.message_id && p.thread_id) parentMap.set(p.message_id, p.thread_id);
+      }
+    }
+
     for (const msg of messages) {
       let threadId: string | null = null;
       const parentRef = msg.in_reply_to || (msg.references ? msg.references.trim().split(/\s+/).pop() : null);
       if (parentRef) {
-        // Try existing rows
-        const { data: parent } = await supabaseAdmin
-          .from("inbox_messages")
-          .select("thread_id, message_id")
-          .eq("account_id", account_id)
-          .eq("message_id", parentRef)
-          .maybeSingle();
-        if (parent?.thread_id) threadId = parent.thread_id;
-        else {
-          // Within current batch
+        threadId = parentMap.get(parentRef) || null;
+        if (!threadId) {
           const inBatch = messages.find((m) => m.message_id === parentRef);
           if (inBatch?.thread_id) threadId = inBatch.thread_id;
         }
       }
-      if (!threadId && msg.subject) {
-        // Subject-based fallback against last 30 days
+      // Subject-based fallback only when no parent ref existed (cheap cases only)
+      if (!threadId && !parentRef && msg.subject) {
         const subjKey = normalizeSubjectKey(msg.subject);
-        if (subjKey) {
+        if (subjKey && /^(re|fwd|fw):/i.test(msg.subject)) {
           const since = new Date(Date.now() - 30 * 86400_000).toISOString();
           const { data: sibling } = await supabaseAdmin
             .from("inbox_messages")
             .select("thread_id, subject")
             .eq("account_id", account_id)
             .gte("received_at", since)
-            .limit(50);
+            .limit(20);
           const match = sibling?.find((s: any) => normalizeSubjectKey(s.subject) === subjKey && s.thread_id);
           if (match) threadId = match.thread_id;
         }
@@ -444,40 +454,49 @@ async function syncAccount(account: any, supabaseAdmin: any): Promise<{ synced: 
       }
     }
 
-    // Emit email.replied events for non-warmup inbound messages matched to a contact
+    // Persist UID progress immediately so a later kill doesn't reprocess.
+    if (maxUid > lastSyncedUid) {
+      await supabaseAdmin.from("email_accounts").update({ last_synced_uid: maxUid }).eq("id", account_id);
+    }
+
+    // Emit email.replied events — batched contact lookup by sender email
     try {
-      if (account.user_id) {
-        for (const msg of messages) {
-          if (msg.is_warmup) continue;
-          if (!msg.from_email) continue;
-          const { data: contactMatch } = await supabaseAdmin
+      if (account.user_id && messages.length > 0) {
+        const senderEmails = Array.from(new Set(
+          messages.filter((m) => !m.is_warmup && m.from_email).map((m) => String(m.from_email).toLowerCase()),
+        ));
+        if (senderEmails.length > 0) {
+          const { data: contactRows } = await supabaseAdmin
             .from("contacts")
-            .select("id, campaign_id, replied_at, campaigns!inner(user_id)")
-            .ilike("email", msg.from_email)
-            .eq("campaigns.user_id", account.user_id)
-            .maybeSingle();
-          if (!contactMatch) continue;
-          if (!contactMatch.replied_at) {
-            await supabaseAdmin
-              .from("contacts")
-              .update({ status: "replied", replied_at: new Date().toISOString() })
-              .eq("id", contactMatch.id);
+            .select("id, email, campaign_id, replied_at, campaigns!inner(user_id)")
+            .in("email", senderEmails)
+            .eq("campaigns.user_id", account.user_id);
+          const byEmail = new Map<string, any>();
+          for (const c of contactRows || []) {
+            if (c.email) byEmail.set(String(c.email).toLowerCase(), c);
           }
-          await supabaseAdmin.from("events").insert({
-            user_id: account.user_id,
-            contact_id: contactMatch.id,
-            event_type: "email.replied",
-            source: { account_id, campaign_id: contactMatch.campaign_id },
-            payload: { subject: msg.subject ?? null },
-          });
+          for (const msg of messages) {
+            if (msg.is_warmup || !msg.from_email) continue;
+            const c = byEmail.get(String(msg.from_email).toLowerCase());
+            if (!c) continue;
+            if (!c.replied_at) {
+              await supabaseAdmin
+                .from("contacts")
+                .update({ status: "replied", replied_at: new Date().toISOString() })
+                .eq("id", c.id);
+            }
+            await supabaseAdmin.from("events").insert({
+              user_id: account.user_id,
+              contact_id: c.id,
+              event_type: "email.replied",
+              source: { account_id, campaign_id: c.campaign_id },
+              payload: { subject: msg.subject ?? null },
+            });
+          }
         }
       }
     } catch (e) {
       console.error("inbox-sync reply event emit failed:", e);
-    }
-
-    if (maxUid > lastSyncedUid) {
-      await supabaseAdmin.from("email_accounts").update({ last_synced_uid: maxUid }).eq("id", account_id);
     }
 
     return { synced: messages.length, last_uid: maxUid };
@@ -506,15 +525,21 @@ Deno.serve(async (req) => {
         .not("imap_host", "is", null);
       if (accListErr) throw accListErr;
 
-      const results: Array<{ account_id: string; email: string; synced?: number; error?: string }> = [];
-      for (const acc of accounts || []) {
-        try {
-          const r = await syncAccount(acc, supabaseAdmin);
-          results.push({ account_id: acc.id, email: acc.email, synced: r.synced });
-        } catch (e: any) {
-          results.push({ account_id: acc.id, email: acc.email, error: String(e?.message || e) });
-        }
-      }
+      const ACCOUNT_TIMEOUT_MS = 8_000;
+      const settled = await Promise.allSettled(
+        (accounts || []).map((acc: any) =>
+          Promise.race([
+            syncAccount(acc, supabaseAdmin, { maxFetch: 25 }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("account sync timeout")), ACCOUNT_TIMEOUT_MS),
+            ),
+          ]).then(
+            (r: any) => ({ account_id: acc.id, email: acc.email, synced: r.synced }),
+            (e: any) => ({ account_id: acc.id, email: acc.email, error: String(e?.message || e) }),
+          ),
+        ),
+      );
+      const results = settled.map((s) => (s.status === "fulfilled" ? s.value : { error: String(s.reason) }));
       return new Response(JSON.stringify({ mode: "fetch_all", count: results.length, results }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
