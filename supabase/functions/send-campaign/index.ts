@@ -153,12 +153,18 @@ Deno.serve(async (req) => {
             html: sanitizeForSmtp(rawBody),
           });
         } else {
-          // Plain text: send exactly what the user typed, no HTML wrapping, no tracking pixel.
+          // Plain text: send the text exactly as typed, but attach a minimal
+          // HTML alternative part carrying the tracking pixel so opens register.
+          const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+          const escaped = personalizedBody
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const plainAsHtml = `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;">${escaped}</pre>${trackingPixel}`;
           await client.send({
             from: account.email,
             to: contact.email,
             subject,
             content: personalizedBody,
+            html: plainAsHtml,
           });
         }
 
