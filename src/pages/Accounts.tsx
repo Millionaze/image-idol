@@ -223,10 +223,10 @@ export default function Accounts() {
   const saveAccount = async () => {
     if (!user) return;
 
-    // Guardrail: warn if the IMAP/SMTP username doesn't match the account email.
-    // A mismatch usually means the wrong mailbox will be synced (which has caused
-    // "I see someone else's emails in this account" bugs).
+    // Guardrail: warn if SMTP-and-IMAP-shared username doesn't match email.
+    // Skipped when IMAP credentials are split (since they're intentionally different).
     if (
+      !form.imap_split &&
       form.username.trim().toLowerCase() !== form.email.trim().toLowerCase()
     ) {
       const ok = window.confirm(
@@ -272,7 +272,15 @@ export default function Accounts() {
 
     setSaving(true);
     try {
-      const { error } = await supabase.from("email_accounts").insert({ user_id: user.id, ...finalForm });
+      // Strip the UI-only `imap_split` flag and only persist IMAP creds when enabled.
+      const { imap_split, imap_username, imap_password, ...rest } = finalForm;
+      const payload: any = {
+        user_id: user.id,
+        ...rest,
+        imap_username: imap_split ? imap_username : null,
+        imap_password: imap_split ? imap_password : null,
+      };
+      const { error } = await supabase.from("email_accounts").insert(payload);
       if (error) throw error;
       toast({ title: "Account added" });
       setForm(emptyForm);
