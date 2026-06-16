@@ -63,6 +63,9 @@ export default function Accounts() {
       imap_port: a.imap_port || 993,
       username: a.username || "",
       password: "", // never pre-fill — leave blank to keep current
+      imap_split: !!a.imap_username,
+      imap_username: a.imap_username || "",
+      imap_password: "", // never pre-fill
     });
   };
 
