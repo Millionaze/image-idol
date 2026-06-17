@@ -525,22 +525,52 @@ Deno.serve(async (req) => {
         .not("imap_host", "is", null);
       if (accListErr) throw accListErr;
 
-      const ACCOUNT_TIMEOUT_MS = 8_000;
-      const settled = await Promise.allSettled(
-        (accounts || []).map((acc: any) =>
-          Promise.race([
-            syncAccount(acc, supabaseAdmin, { maxFetch: 25 }),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error("account sync timeout")), ACCOUNT_TIMEOUT_MS),
-            ),
-          ]).then(
-            (r: any) => ({ account_id: acc.id, email: acc.email, synced: r.synced }),
-            (e: any) => ({ account_id: acc.id, email: acc.email, error: String(e?.message || e) }),
-          ),
-        ),
-      );
-      const results = settled.map((s) => (s.status === "fulfilled" ? s.value : { error: String(s.reason) }));
-      return new Response(JSON.stringify({ mode: "fetch_all", count: results.length, results }), {
+      const ACCOUNT_TIMEOUT_MS = 12_000;
+      const CONCURRENCY = 3;
+      const OVERALL_BUDGET_MS = 110_000;
+      const startedAt = Date.now();
+      const list = accounts || [];
+      const results: any[] = [];
+
+      for (let i = 0; i < list.length; i += CONCURRENCY) {
+        if (Date.now() - startedAt > OVERALL_BUDGET_MS) {
+          for (const acc of list.slice(i)) {
+            results.push({ account_id: acc.id, email: acc.email, skipped: "time budget exhausted" });
+          }
+          break;
+        }
+        const slice = list.slice(i, i + CONCURRENCY);
+        const settled = await Promise.allSettled(
+          slice.map((acc: any) => {
+            if (!acc.imap_host || !(acc.imap_password || acc.password)) {
+              return Promise.resolve({ account_id: acc.id, email: acc.email, skipped: "missing imap credentials" });
+            }
+            return Promise.race([
+              syncAccount(acc, supabaseAdmin, { maxFetch: 15 }),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("account sync timeout")), ACCOUNT_TIMEOUT_MS),
+              ),
+            ]).then(
+              (r: any) => ({ account_id: acc.id, email: acc.email, synced: r.synced, last_uid: r.last_uid }),
+              (e: any) => {
+                const msg = String(e?.message || e);
+                console.error(`sync failed for ${acc.email}: ${msg}`);
+                return { account_id: acc.id, email: acc.email, error: msg };
+              },
+            );
+          }),
+        );
+        for (const s of settled) {
+          results.push(s.status === "fulfilled" ? s.value : { error: String(s.reason) });
+        }
+      }
+
+      const summary = {
+        synced: results.reduce((n, r) => n + (r.synced || 0), 0),
+        failed: results.filter((r) => r.error).length,
+        skipped: results.filter((r) => r.skipped).length,
+      };
+      return new Response(JSON.stringify({ mode: "fetch_all", count: results.length, summary, results }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
