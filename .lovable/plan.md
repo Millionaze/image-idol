@@ -1,59 +1,43 @@
-## Why signatures aren't saving
+## Goal
 
-There is no signature field anywhere — not in the `email_accounts` table, not in `campaigns`, and not in the Accounts or Campaigns UI. So whatever the user is typing has nowhere to go; on refresh it disappears. This isn't a save bug, it's a missing feature.
+Two small UX improvements around signatures on the Campaigns composer:
 
-## Plan — Add signatures
+1. Make it obvious **where** to configure a signature (right now the hint just says "signature will be appended" with no pointer).
+2. Show a **live preview** of the actual signature that will be appended, rendered exactly as the recipient will see it (HTML for HTML campaigns, plain for Plain campaigns).
 
-### 1. Database
-Add two columns to `email_accounts`:
-- `signature_html text` — rich HTML signature (used for HTML campaigns / replies)
-- `signature_plain text` — plain text version (used for Plain campaigns)
+No changes to sending logic, no schema changes — this is purely presentation in `src/pages/Campaigns.tsx`.
 
-Both nullable, default null. No RLS changes needed (existing per-user policy covers it).
+## What changes
 
-### 2. Accounts UI (`src/pages/Accounts.tsx`)
-In both the **Add** and **Edit** dialogs, add a new "Signature" section under the credentials block:
-- Tabs: **Plain** | **HTML**
-- Plain tab: `<Textarea>` (5 rows), monospace hint
-- HTML tab: reuse the existing `RichTextEditor` from `src/components/shared/RichTextEditor.tsx`
-- Helper text: "Appended to the bottom of every email sent from this account. Merge tags like `{{first_name}}` work."
-- Small "Sync from HTML → Plain" button that strips tags into the plain field so users only maintain one
+### 1. Signature source clarity
+Replace the current one-line hint under the body editor with a small info block:
 
-Wire into `saveAccount` / `saveEdit` payloads.
+- Line 1: "Signature will be appended from the selected sending account."
+- Line 2: a link/button "Manage signatures in Accounts →" that navigates to `/accounts` (opens in same tab, since Campaigns dialog can be reopened).
+- If **no sending account is selected yet** (or the campaign has no account attached), show: "Select a sending account to preview its signature." instead of the preview.
+- If the selected account has **no signature configured** for the current `email_type`, show: "This account has no {Plain|HTML} signature. Add one in Accounts." with the same link.
 
-### 3. Sending pipeline
-Append the correct signature just before the send in all three paths:
-- `supabase/functions/send-campaign/index.ts`
-- `supabase/functions/process-sequences/index.ts`
-- `supabase/functions/send-reply/index.ts`
+### 2. Live signature preview
+Under the body editor, add a collapsible "Signature preview" section:
 
-Rules:
-- `email_type === 'plain'` → append `\n\n{signature_plain}` to text body
-- `email_type === 'html'` (or reply) → append `<br><br>{signature_html}` to HTML body, and the stripped version to the text alternative
-- If the corresponding signature field is empty, skip (don't append the other type)
-- Merge-tag substitution runs on the signature the same way it runs on the body
+- Fetch the selected sending account's `signature_html` and `signature_plain` from `email_accounts` (already loaded on Campaigns page — reuse existing accounts state; no extra query needed).
+- Render based on `email_type`:
+  - **HTML mode** → render `signature_html` inside a sandboxed preview box (`div` with `prose prose-invert` styling and `dangerouslySetInnerHTML`, wrapped in a bordered muted card so it visually reads as "appended below your body").
+  - **Plain mode** → render `signature_plain` inside a `<pre>` with `whitespace-pre-wrap` and monospace styling.
+- Substitute merge tags with sample values for the preview only (`{{first_name}}` → "Alex", `{{name}}` → "Alex Rivera", `{{company}}` → "Acme", `{{email}}` → the account email). This matches how the actual send substitutes, so the preview is faithful.
+- Small header row: "Signature preview" + muted subtext "This will be appended after your email body."
+- Collapsed by default (`<details>` element, or a simple show/hide toggle) so it doesn't crowd the composer.
 
-### 4. Campaign preview
-On the Campaigns compose screen, show a small muted "— signature will be appended from account —" hint under the body editor so users understand where it comes from and don't paste it into every campaign.
-
-## Separately — the "users can't log in" issue
-
-Auth logs show `403 bad_jwt / invalid claim: missing sub claim` on `/auth/v1/user`. That means affected browsers have a **stale Supabase session in localStorage** (left over from the Supabase key rotation visible in the project's secrets). The session token is malformed for the current JWT signing key, so `getUser()` 403s forever and `ProtectedRoute` bounces them.
-
-Fix in `src/contexts/AuthContext.tsx`:
-- In the initial `getSession()` handler, also call `supabase.auth.getUser()`. If it returns an `AuthApiError` with `bad_jwt` / `invalid claim`, call `supabase.auth.signOut({ scope: 'local' })` and clear the `sb-*-auth-token` key from localStorage before setting `loading = false`.
-- In `onAuthStateChange`, on `TOKEN_REFRESHED` failure (`session === null` while previously set), do the same local cleanup so a bad refresh boots them to `/login` cleanly instead of blank-screening.
-
-This makes affected users land on `/login` on next page load and lets them sign in normally, instead of being stuck.
-
-## Not changing
-- SMTP/IMAP config, sending logic beyond the signature append, warmup, inbox sync, workflow engine.
+### 3. Empty-state affordance in Accounts (tiny)
+No functional change, just make the discovery path obvious the other direction too: in `src/pages/Accounts.tsx`, when an account has neither `signature_html` nor `signature_plain` set, show a subtle "No signature yet" pill on the account card so users can spot which accounts need one configured. (Skip if this would require restructuring the card — only add if the card already renders per-account meta chips.)
 
 ## Files touched
-- Migration: add 2 columns to `email_accounts`
-- `src/pages/Accounts.tsx` — signature tabs in Add + Edit dialogs
-- `src/pages/Campaigns.tsx` — one hint line under body editor
-- `src/contexts/AuthContext.tsx` — bad_jwt recovery
-- `supabase/functions/send-campaign/index.ts`
-- `supabase/functions/process-sequences/index.ts`
-- `supabase/functions/send-reply/index.ts`
+
+- `src/pages/Campaigns.tsx` — replace signature hint with info block + live preview.
+- `src/pages/Accounts.tsx` — optional "No signature yet" pill (only if card structure allows a one-line addition).
+
+## Not changing
+
+- `send-campaign`, `process-sequences`, `send-reply` — signature append logic stays as-is.
+- Signature storage schema.
+- The Accounts signature editor UI itself.
