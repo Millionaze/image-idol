@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendEmailViaAccount } from "../_shared/send-email-internal.ts";
+import { appendPlainSignature } from "../_shared/signature.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
