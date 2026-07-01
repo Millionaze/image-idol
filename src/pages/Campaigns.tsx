@@ -125,6 +125,8 @@ function SignatureBlock({ account, emailType }: { account: any | undefined; emai
     </details>
   );
 }
+
+export default function Campaigns() {
   const { user } = useAuth();
   const { toast } = useToast();
   const location = useLocation();
