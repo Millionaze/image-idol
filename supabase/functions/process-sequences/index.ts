@@ -6,6 +6,8 @@ import {
   htmlToText,
   classifySmtpError,
 } from "../_shared/smtp-helpers.ts";
+import { appendHtmlSignature, appendPlainSignature } from "../_shared/signature.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
