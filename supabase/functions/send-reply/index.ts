@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
       from_email: account.email,
       from_name: account.name || account.email,
       subject,
-      body: replyText,
+      body: replyWithSig,
       received_at: new Date().toISOString(),
       message_uid: outboundUid,
       is_read: true,
