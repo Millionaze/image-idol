@@ -348,6 +348,8 @@ export default function Campaigns() {
                       className="font-mono text-sm"
                     />
                     <p className="text-xs text-muted-foreground">Plain text emails have higher deliverability for cold outreach. Line breaks are preserved. Open tracking is included via a hidden pixel in the HTML alternative part.</p>
+                    <p className="text-xs text-muted-foreground italic">— Your account signature will be appended automatically.</p>
+
                   </>
                 ) : (
                   <>
@@ -357,6 +359,8 @@ export default function Campaigns() {
                       placeholder="Use {{name}} / {{email}} for personalization"
                     />
                     <p className="text-xs text-muted-foreground">Use HTML mode for newsletters or designed emails. Not recommended for cold outreach.</p>
+                    <p className="text-xs text-muted-foreground italic">— Your account signature will be appended automatically.</p>
+
                   </>
                 )}
               </div>

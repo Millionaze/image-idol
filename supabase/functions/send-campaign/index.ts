@@ -6,6 +6,8 @@ import {
   htmlToText,
   classifySmtpError,
 } from "../_shared/smtp-helpers.ts";
+import { appendHtmlSignature, appendPlainSignature } from "../_shared/signature.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -150,9 +152,12 @@ Deno.serve(async (req) => {
             .replace(/\{\{name\}\}/g, contactName)
             .replace(/\{\{email\}\}/g, contact.email);
 
+          const mergeVars = { name: contactName, email: contact.email };
+
           if (isHtml) {
+            const withSig = appendHtmlSignature(personalizedBody, account, mergeVars);
             const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
-            const rawBody = personalizedBody + trackingPixel;
+            const rawBody = withSig + trackingPixel;
             await withTimeout(client.send({
               from: account.email,
               to: contact.email,
@@ -161,18 +166,20 @@ Deno.serve(async (req) => {
               html: sanitizeForSmtp(rawBody),
             }), SEND_TIMEOUT_MS);
           } else {
+            const withSig = appendPlainSignature(personalizedBody, account, mergeVars);
             const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
-            const escaped = personalizedBody
+            const escaped = withSig
               .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
             const plainAsHtml = `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;">${escaped}</pre>${trackingPixel}`;
             await withTimeout(client.send({
               from: account.email,
               to: contact.email,
               subject,
-              content: personalizedBody,
+              content: withSig,
               html: plainAsHtml,
             }), SEND_TIMEOUT_MS);
           }
+
 
           await supabaseAdmin.from("contacts").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", contact.id);
           sentCount++;

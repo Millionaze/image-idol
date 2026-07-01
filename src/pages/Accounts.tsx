@@ -15,6 +15,10 @@ import { PlacementTestModal } from "@/components/PlacementTestModal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Plus, Trash2, Loader2, Mail, TestTube, ShieldAlert, Info, Pencil } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/shared/RichTextEditor";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+
 import { useToast } from "@/hooks/use-toast";
 
 const presets: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number; smtp_secure: boolean }> = {
@@ -27,7 +31,26 @@ const emptyForm = {
   name: "", email: "", smtp_host: "", smtp_port: 587, smtp_secure: true,
   imap_host: "", imap_port: 993, username: "", password: "",
   imap_split: false, imap_username: "", imap_password: "",
+  signature_html: "", signature_plain: "",
 };
+
+function stripHtmlToPlain(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 
 export default function Accounts() {
   const { user } = useAuth();
@@ -66,8 +89,11 @@ export default function Accounts() {
       imap_split: !!a.imap_username,
       imap_username: a.imap_username || "",
       imap_password: "", // never pre-fill
+      signature_html: a.signature_html || "",
+      signature_plain: a.signature_plain || "",
     });
   };
+
 
   const saveEdit = async () => {
     if (!editAccount) return;
@@ -92,7 +118,10 @@ export default function Accounts() {
       imap_host: editForm.imap_host,
       imap_port: editForm.imap_port,
       username: editForm.username,
+      signature_html: editForm.signature_html || null,
+      signature_plain: editForm.signature_plain || null,
     };
+
 
     // Only update SMTP password if user typed something
     const passwordChanged = editForm.password.length > 0;
@@ -461,6 +490,45 @@ export default function Accounts() {
                   <Switch checked={form.smtp_secure} onCheckedChange={(v) => setForm((f) => ({ ...f, smtp_secure: v }))} />
                   <Label>Use TLS/SSL</Label>
                 </div>
+
+                <div className="space-y-2 pt-3 border-t border-border/50">
+                  <Label>Signature</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Appended to the bottom of every email sent from this account. Merge tags <code>{"{{name}}"}</code> and <code>{"{{email}}"}</code> work.
+                  </p>
+                  <Tabs defaultValue="plain" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2 h-8">
+                      <TabsTrigger value="plain" className="text-xs">Plain</TabsTrigger>
+                      <TabsTrigger value="html" className="text-xs">HTML</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="plain" className="mt-2">
+                      <Textarea
+                        value={form.signature_plain}
+                        onChange={(e) => setForm((f) => ({ ...f, signature_plain: e.target.value }))}
+                        placeholder={"— \nJane Doe\nFounder, Acme"}
+                        rows={5}
+                        className="font-mono text-sm"
+                      />
+                    </TabsContent>
+                    <TabsContent value="html" className="mt-2 space-y-2">
+                      <RichTextEditor
+                        value={form.signature_html}
+                        onChange={(html) => setForm((f) => ({ ...f, signature_html: html }))}
+                        placeholder="Your rich signature (used for HTML campaigns)"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => setForm((f) => ({ ...f, signature_plain: stripHtmlToPlain(f.signature_html) }))}
+                      >
+                        Sync HTML → Plain
+                      </Button>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+
                 {smtpError && (
                   <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">{smtpError}</div>
                 )}
@@ -698,6 +766,45 @@ export default function Accounts() {
               <Switch checked={editForm.smtp_secure} onCheckedChange={(v) => setEditForm((f) => ({ ...f, smtp_secure: v }))} />
               <Label>Use TLS/SSL</Label>
             </div>
+
+            <div className="space-y-2 pt-3 border-t border-border/50">
+              <Label>Signature</Label>
+              <p className="text-xs text-muted-foreground">
+                Appended to the bottom of every email sent from this account. Merge tags <code>{"{{name}}"}</code> and <code>{"{{email}}"}</code> work.
+              </p>
+              <Tabs defaultValue="plain" className="w-full">
+                <TabsList className="grid w-full grid-cols-2 h-8">
+                  <TabsTrigger value="plain" className="text-xs">Plain</TabsTrigger>
+                  <TabsTrigger value="html" className="text-xs">HTML</TabsTrigger>
+                </TabsList>
+                <TabsContent value="plain" className="mt-2">
+                  <Textarea
+                    value={editForm.signature_plain}
+                    onChange={(e) => setEditForm((f) => ({ ...f, signature_plain: e.target.value }))}
+                    placeholder={"— \nJane Doe\nFounder, Acme"}
+                    rows={5}
+                    className="font-mono text-sm"
+                  />
+                </TabsContent>
+                <TabsContent value="html" className="mt-2 space-y-2">
+                  <RichTextEditor
+                    value={editForm.signature_html}
+                    onChange={(html) => setEditForm((f) => ({ ...f, signature_html: html }))}
+                    placeholder="Your rich signature (used for HTML campaigns)"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setEditForm((f) => ({ ...f, signature_plain: stripHtmlToPlain(f.signature_html) }))}
+                  >
+                    Sync HTML → Plain
+                  </Button>
+                </TabsContent>
+              </Tabs>
+            </div>
+
             {editError && (
               <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">{editError}</div>
             )}

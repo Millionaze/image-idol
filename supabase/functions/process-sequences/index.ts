@@ -6,6 +6,8 @@ import {
   htmlToText,
   classifySmtpError,
 } from "../_shared/smtp-helpers.ts";
+import { appendHtmlSignature, appendPlainSignature } from "../_shared/signature.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -104,9 +106,11 @@ Deno.serve(async (req) => {
         } catch (_) { /* ignore */ }
 
         const trackingPixel = `<img src="${trackBaseUrl}?id=${contact.id}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+        const mergeVars = { name: contactName, email: contact.email };
 
         if (isHtml) {
-          const rawBody = personalizedBody + trackingPixel;
+          const withSig = appendHtmlSignature(personalizedBody, account, mergeVars);
+          const rawBody = withSig + trackingPixel;
           await client.send({
             from: account.email,
             to: contact.email,
@@ -115,19 +119,21 @@ Deno.serve(async (req) => {
             html: sanitizeForSmtp(rawBody),
           });
         } else {
+          const withSig = appendPlainSignature(personalizedBody, account, mergeVars);
           // Plain text: keep text as-is, attach minimal HTML alt part with pixel.
-          const escaped = personalizedBody
+          const escaped = withSig
             .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
           const plainAsHtml = `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;">${escaped}</pre>${trackingPixel}`;
           await client.send({
             from: account.email,
             to: contact.email,
             subject,
-            content: personalizedBody,
+            content: withSig,
             html: plainAsHtml,
           });
         }
         try { await client.close(); } catch { /* ignore */ }
+
         // Get next step
         const { data: nextStep } = await supabase
           .from("sequence_steps")

@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendEmailViaAccount } from "../_shared/send-email-internal.ts";
+import { appendPlainSignature } from "../_shared/signature.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -83,15 +85,18 @@ Deno.serve(async (req) => {
         : original.message_id;
     }
 
+    const replyWithSig = appendPlainSignature(replyText, account);
+
     const result = await sendEmailViaAccount({
       account,
       to: toAddr,
       subject,
-      htmlBody: replyText,
+      htmlBody: replyWithSig,
       plainTextOnly: true,
       trackOpens: false,
       headers,
     });
+
 
     if (!result.success) {
       return new Response(JSON.stringify({ error: result.error || "Send failed" }), {
@@ -110,7 +115,7 @@ Deno.serve(async (req) => {
       from_email: account.email,
       from_name: account.name || account.email,
       subject,
-      body: replyText,
+      body: replyWithSig,
       received_at: new Date().toISOString(),
       message_uid: outboundUid,
       is_read: true,
