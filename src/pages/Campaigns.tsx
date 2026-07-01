@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -57,6 +57,73 @@ interface SequenceStep {
   delay_days: number;
   delay_hours: number;
   condition_type: ConditionType;
+}
+
+function applySampleMergeTags(input: string, accountEmail: string): string {
+  const samples: Record<string, string> = {
+    first_name: "Alex",
+    last_name: "Rivera",
+    name: "Alex Rivera",
+    email: accountEmail || "prospect@example.com",
+    company: "Acme",
+  };
+  return input.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, k) => samples[k] ?? `{{${k}}}`);
+}
+
+function SignatureBlock({ account, emailType }: { account: any | undefined; emailType: EmailType }) {
+  const link = (
+    <Link to="/accounts" className="text-primary hover:underline">
+      Manage signatures in Accounts →
+    </Link>
+  );
+
+  if (!account) {
+    return (
+      <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 space-y-1">
+        <p className="text-xs text-muted-foreground">Signature will be appended from the selected sending account.</p>
+        <p className="text-xs text-muted-foreground">Select a sending account to preview its signature. {link}</p>
+      </div>
+    );
+  }
+
+  const sig = emailType === "html" ? (account.signature_html || "") : (account.signature_plain || "");
+  const label = emailType === "html" ? "HTML" : "Plain";
+
+  if (!sig.trim()) {
+    return (
+      <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 space-y-1">
+        <p className="text-xs text-muted-foreground">Signature will be appended from <span className="font-medium">{account.email}</span>.</p>
+        <p className="text-xs text-muted-foreground">This account has no {label} signature yet. {link}</p>
+      </div>
+    );
+  }
+
+  const rendered = applySampleMergeTags(sig, account.email);
+
+  return (
+    <details className="rounded-md border border-border bg-muted/30 group">
+      <summary className="cursor-pointer list-none px-3 py-2 flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          Signature preview <span className="opacity-60">· appended after your body</span>
+        </span>
+        <span className="opacity-60 group-open:rotate-180 transition-transform">▾</span>
+      </summary>
+      <div className="border-t border-border px-3 py-3 bg-background/50">
+        {emailType === "html" ? (
+          <div
+            className="prose prose-invert prose-sm max-w-none"
+            dangerouslySetInnerHTML={{ __html: rendered }}
+          />
+        ) : (
+          <pre className="whitespace-pre-wrap font-mono text-xs text-foreground">{rendered}</pre>
+        )}
+      </div>
+      <div className="px-3 pb-2 text-[10px] text-muted-foreground flex justify-between">
+        <span>From {account.email}</span>
+        {link}
+      </div>
+    </details>
+  );
 }
 
 export default function Campaigns() {
@@ -348,7 +415,7 @@ export default function Campaigns() {
                       className="font-mono text-sm"
                     />
                     <p className="text-xs text-muted-foreground">Plain text emails have higher deliverability for cold outreach. Line breaks are preserved. Open tracking is included via a hidden pixel in the HTML alternative part.</p>
-                    <p className="text-xs text-muted-foreground italic">— Your account signature will be appended automatically.</p>
+                    <SignatureBlock account={accounts.find((a) => a.id === form.account_id)} emailType="plain" />
 
                   </>
                 ) : (
@@ -359,7 +426,7 @@ export default function Campaigns() {
                       placeholder="Use {{name}} / {{email}} for personalization"
                     />
                     <p className="text-xs text-muted-foreground">Use HTML mode for newsletters or designed emails. Not recommended for cold outreach.</p>
-                    <p className="text-xs text-muted-foreground italic">— Your account signature will be appended automatically.</p>
+                    <SignatureBlock account={accounts.find((a) => a.id === form.account_id)} emailType="html" />
 
                   </>
                 )}
