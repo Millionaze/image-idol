@@ -89,8 +89,11 @@ export default function Accounts() {
       imap_split: !!a.imap_username,
       imap_username: a.imap_username || "",
       imap_password: "", // never pre-fill
+      signature_html: a.signature_html || "",
+      signature_plain: a.signature_plain || "",
     });
   };
+
 
   const saveEdit = async () => {
     if (!editAccount) return;
