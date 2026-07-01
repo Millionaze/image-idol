@@ -118,7 +118,10 @@ export default function Accounts() {
       imap_host: editForm.imap_host,
       imap_port: editForm.imap_port,
       username: editForm.username,
+      signature_html: editForm.signature_html || null,
+      signature_plain: editForm.signature_plain || null,
     };
+
 
     // Only update SMTP password if user typed something
     const passwordChanged = editForm.password.length > 0;
