@@ -359,6 +359,8 @@ export default function Campaigns() {
                       placeholder="Use {{name}} / {{email}} for personalization"
                     />
                     <p className="text-xs text-muted-foreground">Use HTML mode for newsletters or designed emails. Not recommended for cold outreach.</p>
+                    <p className="text-xs text-muted-foreground italic">— Your account signature will be appended automatically.</p>
+
                   </>
                 )}
               </div>
