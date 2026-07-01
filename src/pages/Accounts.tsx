@@ -31,7 +31,26 @@ const emptyForm = {
   name: "", email: "", smtp_host: "", smtp_port: 587, smtp_secure: true,
   imap_host: "", imap_port: 993, username: "", password: "",
   imap_split: false, imap_username: "", imap_password: "",
+  signature_html: "", signature_plain: "",
 };
+
+function stripHtmlToPlain(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 
 export default function Accounts() {
   const { user } = useAuth();
