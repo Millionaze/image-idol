@@ -589,6 +589,8 @@ export type Database = {
           name: string
           password: string
           reputation_score: number
+          signature_html: string | null
+          signature_plain: string | null
           smtp_host: string
           smtp_port: number
           smtp_secure: boolean
@@ -620,6 +622,8 @@ export type Database = {
           name: string
           password: string
           reputation_score?: number
+          signature_html?: string | null
+          signature_plain?: string | null
           smtp_host: string
           smtp_port?: number
           smtp_secure?: boolean
@@ -651,6 +655,8 @@ export type Database = {
           name?: string
           password?: string
           reputation_score?: number
+          signature_html?: string | null
+          signature_plain?: string | null
           smtp_host?: string
           smtp_port?: number
           smtp_secure?: boolean
