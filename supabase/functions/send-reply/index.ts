@@ -85,15 +85,18 @@ Deno.serve(async (req) => {
         : original.message_id;
     }
 
+    const replyWithSig = appendPlainSignature(replyText, account);
+
     const result = await sendEmailViaAccount({
       account,
       to: toAddr,
       subject,
-      htmlBody: replyText,
+      htmlBody: replyWithSig,
       plainTextOnly: true,
       trackOpens: false,
       headers,
     });
+
 
     if (!result.success) {
       return new Response(JSON.stringify({ error: result.error || "Send failed" }), {
