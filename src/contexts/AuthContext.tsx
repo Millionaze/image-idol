@@ -32,7 +32,7 @@ function purgeSupabaseAuthStorage() {
 }
 
 function isBadJwtError(err: unknown): boolean {
-  const msg = (err as any)?.message?.toString().toLowerCase() ?? "";
+  const msg = getErrorMessage(err);
   return (
     msg.includes("bad_jwt") ||
     msg.includes("invalid claim") ||
@@ -40,6 +40,33 @@ function isBadJwtError(err: unknown): boolean {
     msg.includes("jwt expired") ||
     msg.includes("invalid jwt")
   );
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message.toLowerCase();
+  if (typeof err === "string") return err.toLowerCase();
+  if (typeof err === "object" && err !== null && "message" in err) {
+    return String(err.message).toLowerCase();
+  }
+  return "";
+}
+
+function isRecoverableSessionError(err: unknown): boolean {
+  const msg = getErrorMessage(err);
+  return (
+    isBadJwtError(err) ||
+    msg.includes("failed to fetch") ||
+    msg.includes("upstream request timeout") ||
+    msg.includes("network request failed") ||
+    msg.includes("load failed") ||
+    msg.includes("gateway timeout")
+  );
+}
+
+async function clearBrokenSession() {
+  purgeSupabaseAuthStorage();
+  await supabase.auth.signOut({ scope: "local" }).catch(() => {});
+  purgeSupabaseAuthStorage();
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -67,9 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // (key rotation, malformed token) sign out locally so the user can
           // reach /login instead of being stuck.
           const { error: userErr } = await supabase.auth.getUser();
-          if (userErr && isBadJwtError(userErr)) {
-            await supabase.auth.signOut({ scope: "local" }).catch(() => {});
-            purgeSupabaseAuthStorage();
+          if (userErr && isRecoverableSessionError(userErr)) {
+            await clearBrokenSession();
             setSession(null);
             setUser(null);
             setLoading(false);
@@ -79,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
       } catch (e) {
-        if (isBadJwtError(e)) purgeSupabaseAuthStorage();
+        if (isRecoverableSessionError(e)) await clearBrokenSession();
         setSession(null);
         setUser(null);
       } finally {
@@ -100,8 +126,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error as Error | null };
+    try {
+      const firstAttempt = await supabase.auth.signInWithPassword({ email, password });
+      if (!firstAttempt.error || !isRecoverableSessionError(firstAttempt.error)) {
+        return { error: firstAttempt.error as Error | null };
+      }
+
+      await clearBrokenSession();
+      const retry = await supabase.auth.signInWithPassword({ email, password });
+      return { error: retry.error as Error | null };
+    } catch (error) {
+      if (!isRecoverableSessionError(error)) {
+        return { error: error instanceof Error ? error : new Error("Unable to sign in") };
+      }
+
+      await clearBrokenSession();
+      try {
+        const retry = await supabase.auth.signInWithPassword({ email, password });
+        return { error: retry.error as Error | null };
+      } catch (retryError) {
+        return {
+          error: retryError instanceof Error
+            ? retryError
+            : new Error("Unable to reach the sign-in service. Please try again."),
+        };
+      }
+    }
   };
 
   const signOut = async () => {
